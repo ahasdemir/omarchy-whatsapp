@@ -211,30 +211,42 @@ function ingest(chatJid, raw, { live }) {
   if (isIgnorableChat(chatJid)) return null
   if (isSilent(raw.message)) return null
 
-  const message = flatten(chatJid, raw)
+  learnAliasesFromMessage(raw)
+  const canonicalTarget = store.canonicalJid(chatJid) || chatJid
+
+  const message = flatten(canonicalTarget, raw)
   if (!message.ts) message.ts = Math.floor(Date.now() / 1000)
 
-  const existed = !!store.findMessage(chatJid, message.id)
-  learnAliasesFromMessage(raw)
-  store.upsertMessage(chatJid, message)
-  const chat = store.touchChat(chatJid, message)
-  if (!chat.isGroup && raw.pushName) store.rememberName(chatJid, raw.pushName)
-  resolveGroupName(chatJid)
+  const existed = !!store.findMessage(canonicalTarget, message.id)
+
+  store.upsertMessage(canonicalTarget, message)
+  const chat = store.touchChat(canonicalTarget, message)
+
+  if (!chat.isGroup && !raw.key?.fromMe && raw.pushName) {
+    store.rememberName(canonicalTarget, raw.pushName)
+  }
+
+  const participant = raw.key?.participant || raw.participant
+  if (chat.isGroup && !raw.key?.fromMe && participant && raw.pushName) {
+    store.rememberName(participant, raw.pushName)
+  }
+
+  resolveGroupName(canonicalTarget)
 
   if (live && !existed && !message.fromMe) {
-    store.bumpUnread(chatJid)
+    store.bumpUnread(canonicalTarget)
     if (message.ts >= startedAt) {
       const title = chat.isGroup ? (chat.name || 'Group') : (message.senderName || chat.name)
       const body = chat.isGroup ? `${message.senderName}: ${message.text}` : message.text
-      notifier.queue({ jid: chatJid, title, body, muted: !!chat.muted })
+      notifier.queue({ jid: canonicalTarget, title, body, muted: !!chat.muted })
     }
   }
 
-  const chatKey = normalizeJid(chatJid)
-  if (message.media && !message.imagePath && (live || wantedChats.has(chatKey) || wantedChats.has(chatJid))) {
-    media.enqueue(chatJid, message)
+  const chatKey = normalizeJid(canonicalTarget)
+  if (message.media && !message.imagePath && (live || wantedChats.has(chatKey) || wantedChats.has(canonicalTarget))) {
+    media.enqueue(canonicalTarget, message)
   }
-  return message
+  return { message, canonicalTarget }
 }
 
 function applyChatMetadata(rawChats) {
@@ -703,17 +715,17 @@ async function connect() {
       for (const raw of messages || []) {
         const jid = raw?.key?.remoteJid
         if (!jid) continue
-        const existed = !!store.findMessage(jid, raw?.key?.id)
-        const message = ingest(jid, raw, { live })
-        if (!message) continue
-        // History / media retries must not shove old rows into an open chat.
+        const result = ingest(jid, raw, { live })
+        if (!result) continue
+        const { message, canonicalTarget } = result
+        const existed = !!store.findMessage(canonicalTarget, raw?.key?.id)
         if (!live && existed) continue
         if (!live) continue
         bus.broadcast({
           t: 'message',
-          jid,
+          jid: canonicalTarget,
           message: publicMessage(message),
-          chat: store.chat(jid),
+          chat: store.chat(canonicalTarget),
           unread: store.totalUnread()
         })
       }
@@ -847,49 +859,50 @@ async function handleCommand(payload, reply) {
     case 'messages':
       if (!payload.jid) throw new Error('messages: jid required')
       {
-        const list = store.messageList(payload.jid, payload.limit || 60)
-        wantedChats.add(payload.jid)
+        const canonical = store.canonicalJid(payload.jid) || payload.jid
+        const list = store.messageList(canonical, payload.limit || 60)
+        wantedChats.add(canonical)
         wantedChats.add(normalizeJid(payload.jid))
         reply({
           t: 'messages',
           jid: payload.jid,
-          chat: store.chat(payload.jid),
+          chat: store.chat(canonical),
           messages: list.map(publicMessage)
         })
         for (const message of list) {
-          if (message.media && !existingMediaPath(message)) media.enqueue(payload.jid, message)
+          if (message.media && !existingMediaPath(message)) media.enqueue(canonical, message)
         }
-        refreshMissingImages(payload.jid, list).catch((err) => {
-          logger.debug({ err, jid: payload.jid }, 'media: history refresh failed')
+        refreshMissingImages(canonical, list).catch((err) => {
+          logger.debug({ err, jid: canonical }, 'media: history refresh failed')
         })
       }
       return
 
     case 'send': {
-      const jid = payload.jid
+      const rawJid = payload.jid
       const text = String(payload.text || '')
-      if (!jid) throw new Error('send: jid required')
+      if (!rawJid) throw new Error('send: jid required')
       if (!text.trim()) throw new Error('send: empty message')
       if (!sock || connection !== 'open') throw new Error('send: not connected to WhatsApp')
 
+      const canonical = store.canonicalJid(rawJid) || rawJid
       const options = {}
       if (payload.quoted) {
-        const list = store.messages.get(jid) || []
+        const list = store.messages.get(canonical) || []
         const quoted = list.find((m) => m.id === payload.quoted)
-        // Baileys needs the original envelope to quote; the flattened copy only
-        // keeps the key, which is enough for a reply stanza.
         if (quoted?.key) options.quoted = { key: quoted.key, message: { conversation: quoted.text } }
       }
 
-      const sent = await sock.sendMessage(jid, { text }, options)
+      const sent = await sock.sendMessage(rawJid, { text }, options)
       if (sent) {
-        const message = ingest(jid, sent, { live: false })
-        if (message) {
-          bus.broadcast({ t: 'message', jid, message: publicMessage(message), chat: store.chat(jid), unread: store.totalUnread() })
+        const res = ingest(rawJid, sent, { live: false })
+        if (res) {
+          const { message, canonicalTarget } = res
+          bus.broadcast({ t: 'message', jid: rawJid, message: publicMessage(message), chat: store.chat(canonicalTarget), unread: store.totalUnread() })
           pushChats()
         }
       }
-      reply({ t: 'ack', id, ok: true, jid })
+      reply({ t: 'ack', id, ok: true, jid: rawJid })
       return
     }
 
