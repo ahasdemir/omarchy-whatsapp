@@ -1,6 +1,6 @@
 [Unit]
 Description=WhatsApp bridge for the Omarchy shell
-Documentation=https://github.com/ricky/omarchy-whatsapp
+Documentation=https://github.com/srineshr1/omarchy-whatsapp
 After=graphical-session.target
 PartOf=graphical-session.target
 

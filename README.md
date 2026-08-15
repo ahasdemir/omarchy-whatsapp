@@ -39,7 +39,7 @@ the same time.
 ## Install
 
 ```sh
-git clone https://github.com/ricky/omarchy-whatsapp.git
+git clone https://github.com/srineshr1/omarchy-whatsapp.git
 cd omarchy-whatsapp
 ./install.sh
 ```
@@ -52,7 +52,7 @@ Via the plugin manager instead (the installer never runs plugin code, so the
 setup step is manual afterwards):
 
 ```sh
-omarchy plugin add https://github.com/ricky/omarchy-whatsapp.git --enable --yes
+omarchy plugin add https://github.com/srineshr1/omarchy-whatsapp.git --enable --yes
 ~/.config/omarchy/plugins/io.github.ricky.whatsapp/install.sh
 ```
 
