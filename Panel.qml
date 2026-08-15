@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import Quickshell
+import Quickshell.Wayland
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -28,6 +29,8 @@ Panel {
   property string statusLine: ""
   property bool pinToLatest: true
   property bool logoutConfirmOpen: false
+  property string peekImagePath: ""
+  readonly property bool peekActive: peekImagePath.length > 0
 
   readonly property var chats: client ? client.chats : []
   readonly property bool daemonOnline: client ? client.daemonOnline : false
@@ -232,6 +235,16 @@ Panel {
   }
 
   Process {
+    id: linkLauncher
+    property string targetUrl: ""
+    command: ["xdg-open", targetUrl]
+    function open(url) {
+      targetUrl = url
+      running = true
+    }
+  }
+
+  Process {
     id: webLauncher
     command: [root.pluginDir + "/bin/omarchy-whatsapp-open", root.setting("webAppUrl", "https://web.whatsapp.com")]
   }
@@ -266,11 +279,12 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      // Composer and the logout confirm own keys while they are up.
-      blocked: composer.activeFocus || root.logoutConfirmOpen
+      // Composer, logout confirm, and image peek own keys while they are up.
+      blocked: composer.activeFocus || root.logoutConfirmOpen || root.peekActive
 
       onCloseRequested: {
-        if (root.logoutConfirmOpen) root.cancelLogout()
+        if (root.peekActive) root.peekImagePath = ""
+        else if (root.logoutConfirmOpen) root.cancelLogout()
         else if (root.view === "chat") root.back()
         else root.close()
       }
@@ -674,17 +688,47 @@ Panel {
                       source: bubbleRow.hasImage
                         ? Qt.resolvedUrl("file://" + messageRow.modelData.imagePath)
                         : ""
+
+                      MouseArea {
+                        id: photoMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.peekImagePath = messageRow.modelData.imagePath
+
+                        Rectangle {
+                          anchors.fill: parent
+                          color: photoMouse.containsMouse ? "#20ffffff" : "transparent"
+                          radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(4)
+
+                          Text {
+                            anchors.centerIn: parent
+                            visible: photoMouse.containsMouse
+                            text: "\uf00e"
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.title
+                            color: "#ffffff"
+                          }
+                        }
+                      }
                     }
 
                     Text {
                       id: bodyLabel
                       visible: bubbleRow.showBody
                       width: Math.min(implicitWidth, bubbleRow.maxInner)
-                      text: messageRow.modelData.text || ""
+                      textFormat: Text.StyledText
+                      text: Model.formatMessageText(messageRow.modelData.text, root.bar ? root.bar.urgent : Color.accent)
                       color: root.barForeground
+                      linkColor: root.bar ? root.bar.urgent : Color.accent
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       wrapMode: Text.Wrap
+                      onLinkActivated: function (link) {
+                        if (link) {
+                          if (!Qt.openUrlExternally(link)) linkLauncher.open(link)
+                        }
+                      }
                     }
 
                     Text {
@@ -775,6 +819,66 @@ Panel {
 
         Keys.onPressed: function (event) {
           if (handleKey(event)) event.accepted = true
+        }
+      }
+    }
+  }
+
+  // ── Desktop Screen-Centered Image Peek Window ───────────────────────
+  PanelWindow {
+    id: imagePeekOverlay
+    visible: root.peekActive
+    anchors { top: true; bottom: true; left: true; right: true }
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-whatsapp-peek"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: root.peekActive ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+
+    onVisibleChanged: {
+      if (visible) {
+        Qt.callLater(function () { peekKeyCatcher.forceActiveFocus() })
+      }
+    }
+
+    Rectangle {
+      anchors.fill: parent
+      color: Qt.rgba(0, 0, 0, 0.82)
+
+      MouseArea {
+        anchors.fill: parent
+        onClicked: root.peekImagePath = ""
+      }
+    }
+
+    Item {
+      id: peekKeyCatcher
+      anchors.fill: parent
+      focus: root.peekActive
+
+      Keys.onEscapePressed: function (event) {
+        root.peekImagePath = ""
+        event.accepted = true
+      }
+
+      Item {
+        anchors.centerIn: parent
+        width: Math.min(parent.width * 0.85, Style.space(950))
+        height: Math.min(parent.height * 0.85, Style.space(850))
+
+        Image {
+          id: peekImage
+          anchors.centerIn: parent
+          width: Math.min(parent.width, sourceSize.width > 0 ? sourceSize.width : parent.width)
+          height: Math.min(parent.height, sourceSize.height > 0 ? sourceSize.height : parent.height)
+          fillMode: Image.PreserveAspectFit
+          asynchronous: true
+          source: root.peekActive ? Qt.resolvedUrl("file://" + root.peekImagePath) : ""
+
+          MouseArea {
+            anchors.fill: parent
+            onClicked: function (event) { event.accepted = true }
+          }
         }
       }
     }
