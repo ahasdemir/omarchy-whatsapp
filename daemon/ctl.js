@@ -15,6 +15,7 @@ const USAGE = `Usage: omarchy-whatsapp-ctl <command> [args]
   send <jid> <text...>   send a text message
   read <jid>             mark a chat read
   focus <jid>            select that chat in every open bar panel
+  login                  start QR pairing (stops after 5 minutes)
   pair <phone>           request an 8-digit pairing code instead of a QR
   reconnect              drop the socket and reconnect
   logout                 unlink this device and clear local credentials
@@ -46,6 +47,8 @@ function buildRequest() {
     case 'focus':
       if (!args[0]) fail('focus: jid required')
       return { t: 'focus', jid: args[0] }
+    case 'login':
+      return { t: 'login' }
     case 'pair':
       if (!args[0]) fail('pair: phone number required')
       return { t: 'pair', phone: args[0] }

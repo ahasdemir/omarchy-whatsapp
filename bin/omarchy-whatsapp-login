@@ -70,11 +70,10 @@ if [[ $(status_field connection) == "open" ]]; then
   exit 0
 fi
 
-# The daemon pauses QR refresh after five minutes with no scan. Reopen the
-# pairing window so a fresh, scannable code is on the way.
-if [[ $(status_field pairingStopped) == "true" ]]; then
-  echo "Pairing was paused; requesting a fresh QR code..."
-  "${CTL[@]}" reconnect >/dev/null 2>&1 || true
+# QR pairing only starts when asked. Reopen the five-minute window.
+if [[ $(status_field connection) != "qr" || $(status_field pairingStopped) == "true" ]]; then
+  echo "Requesting a QR code..."
+  "${CTL[@]}" login >/dev/null 2>&1 || "${CTL[@]}" reconnect >/dev/null 2>&1 || true
   sleep 2
 fi
 

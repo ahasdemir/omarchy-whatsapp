@@ -23,7 +23,7 @@ BarWidget {
   }
 
   readonly property int unread: client.unread
-  readonly property bool linked: client.ready
+  readonly property bool linked: client.signedIn
   readonly property bool showCount: root.setting("showUnreadCount", true) === true
   readonly property bool hideWhenEmpty: root.setting("hideWhenEmpty", false) === true
 
@@ -56,6 +56,7 @@ BarWidget {
   function focusChat(jid) {
     if (!jid || !panelLoader.item) return
     panelLoader.item.prepareChat(jid)
+    panelLoader.item.open()
   }
 
   implicitWidth: button.implicitWidth
@@ -101,10 +102,9 @@ BarWidget {
     active: root.unread > 0
     dimmed: !root.linked
     tooltipText: {
-      var label = Model.connectionLabel(client.connectionState, client.needsLogin,
-        client.daemonOnline, client.pairingStopped)
-      if (root.unread > 0) return label + " \u00b7 " + root.unread + " unread"
-      return "WhatsApp \u00b7 " + label
+      if (client.needsLogin) return "WhatsApp"
+      if (root.unread > 0) return "WhatsApp \u00b7 " + root.unread + " unread"
+      return "WhatsApp"
     }
     onPressed: function (buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()

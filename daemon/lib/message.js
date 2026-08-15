@@ -61,6 +61,43 @@ const SILENT_TYPES = new Set([
   'encReactionMessage'
 ])
 
+function bytesToB64(value) {
+  if (!value) return ''
+  if (typeof value === 'string') return value
+  if (Buffer.isBuffer(value)) return value.toString('base64')
+  if (value instanceof Uint8Array) return Buffer.from(value).toString('base64')
+  if (value.type === 'Buffer' && Array.isArray(value.data)) return Buffer.from(value.data).toString('base64')
+  return ''
+}
+
+// Image/sticker payloads we can decrypt later. Video and documents stay labels.
+export function extractImage(message) {
+  const content = normalizeMessageContent(message)
+  if (!content) return null
+  const type = getContentType(content)
+  if (type !== 'imageMessage' && type !== 'stickerMessage') return null
+  const node = content[type]
+  if (!node || typeof node !== 'object') return null
+  const mediaKey = bytesToB64(node.mediaKey)
+  if (!mediaKey || !(node.directPath || node.url)) return null
+  const fileLength = Number(node.fileLength || 0)
+  return {
+    kind: type === 'stickerMessage' ? 'sticker' : 'image',
+    mimetype: node.mimetype || (type === 'stickerMessage' ? 'image/webp' : 'image/jpeg'),
+    mediaKey,
+    directPath: node.directPath || '',
+    url: node.url || '',
+    fileEncSha256: bytesToB64(node.fileEncSha256),
+    fileSha256: bytesToB64(node.fileSha256),
+    fileLength,
+    caption: typeof node.caption === 'string' ? node.caption : ''
+  }
+}
+
+export function isPhotoPlaceholder(text) {
+  return /^[\uf03e\uf118]?\s*(Photo|Sticker)?$/i.test(String(text || '').trim())
+}
+
 export function messageType(message) {
   const content = normalizeMessageContent(message)
   if (!content) return ''
@@ -140,8 +177,11 @@ export function isIgnorableChat(jid) {
 // shows something dialable instead of a raw jid.
 export function prettyJid(jid) {
   if (!jid) return ''
-  const user = String(jid).split('@')[0].split(':')[0]
+  const [userPart, server] = String(jid).split('@')
+  const user = (userPart || '').split(':')[0]
   if (!user) return String(jid)
-  if (isGroupJid(jid)) return 'Group'
+  if (isGroupJid(jid) || server === 'g.us') return 'Group'
+  // Linked-ID chats are not phone numbers; prefixing "+" just looks like garbage.
+  if (server === 'lid') return user
   return /^\d{6,}$/.test(user) ? `+${user}` : user
 }

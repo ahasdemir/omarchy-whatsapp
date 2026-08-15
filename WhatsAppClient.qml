@@ -26,6 +26,7 @@ Item {
   property bool daemonOnline: false
   property string connectionState: "unknown"
   property bool needsLogin: false
+  property bool linked: false
   property bool hasQr: false
   // The daemon pauses QR refresh after its pairing window closes rather than
   // leave an expired code on screen.
@@ -37,6 +38,7 @@ Item {
   property string lastError: ""
   property var chats: []
   property string lastSocketError: ""
+  property bool pendingLogin: false
 
   // Whether the daemon is actually reachable.
   //
@@ -47,11 +49,13 @@ Item {
   property bool linkUp: false
   property double lastFrameMs: 0
 
-  readonly property bool ready: daemonOnline && !needsLogin && connectionState === "open"
+  readonly property bool signedIn: linked === true || (needsLogin !== true && (me !== null || (chats && chats.length > 0)))
+  readonly property bool ready: signedIn && connectionState === "open"
 
   signal messagesLoaded(string jid, var chat, var messages)
   signal messageArrived(string jid, var message, var chat)
   signal messageStatusChanged(string jid, string messageId, int status)
+  signal messageMedia(string jid, string messageId, string imagePath)
   signal focusRequested(string jid)
   signal commandFailed(string command, string message)
   signal pairCodeReceived(string code)
@@ -59,13 +63,19 @@ Item {
 
   function request(payload) {
     var socket = socketLoader.item
-    if (!socket || !root.linkUp) {
-      root.commandFailed(payload.t || "", "Not connected to the WhatsApp daemon")
-      return false
-    }
+    if (!socket || !root.linkUp) return false
     socket.write(JSON.stringify(payload) + "\n")
     socket.flush()
     return true
+  }
+
+  function startLogin() {
+    root.pendingLogin = true
+    if (!root.linkUp) {
+      root.startDaemon()
+      return false
+    }
+    return request({ t: "login" })
   }
 
   function refresh() { request({ t: "hello" }) }
@@ -110,11 +120,13 @@ Item {
       root.lastFrameMs = Date.now()
       retryTimer.stop()
       root.refresh()
+      if (root.pendingLogin) {
+        root.pendingLogin = false
+        root.request({ t: "login" })
+      }
     } else {
       root.linkUp = false
-      root.daemonOnline = false
-      root.connectionState = "unknown"
-      // The daemon may just be restarting; keep retrying quietly.
+      // A brief socket blip is not "logged out". Retry quietly.
       retryTimer.start()
     }
   }
@@ -122,7 +134,6 @@ Item {
   function handleSocketError(error) {
     if (!socketLoader.active) return
     root.linkUp = false
-    root.daemonOnline = false
     root.lastSocketError = String(error)
     retryTimer.start()
   }
@@ -144,6 +155,7 @@ Item {
         root.daemonOnline = true
         root.connectionState = frame.connection || "unknown"
         root.needsLogin = frame.needsLogin === true
+        root.linked = frame.linked === true
         root.hasQr = frame.hasQr === true
         root.pairingStopped = frame.pairingStopped === true
         // Path before version: anything reacting to the version bump must
@@ -154,6 +166,7 @@ Item {
         root.me = frame.me || null
         root.lastError = frame.lastError || ""
         if (frame.chats !== undefined) root.chats = frame.chats || []
+        if (root.linked) root.pendingLogin = false
         break
 
       case "chats":
@@ -172,6 +185,10 @@ Item {
 
       case "messageStatus":
         root.messageStatusChanged(frame.jid || "", frame.id || "", frame.status || 0)
+        break
+
+      case "messageMedia":
+        root.messageMedia(frame.jid || "", frame.id || "", frame.imagePath || "")
         break
 
       case "focus":
@@ -243,6 +260,7 @@ Item {
         return
       }
       root.retryCount += 1
+      if (root.retryCount >= 4) root.daemonOnline = false
       if (root.autostartDaemon && root.retryCount === 3) root.startDaemon()
       root.reconnectSocket()
     }

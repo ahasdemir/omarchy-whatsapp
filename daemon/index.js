@@ -1,4 +1,4 @@
-import { chmodSync, readdirSync, rmSync, writeFileSync, unlinkSync } from 'node:fs'
+import { chmodSync, readdirSync, readFileSync, rmSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import makeWASocket, {
   Browsers,
@@ -6,16 +6,19 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   jidNormalizedUser,
   makeCacheableSignalKeyStore,
-  useMultiFileAuthState
+  useMultiFileAuthState,
+  USyncQuery,
+  USyncUser
 } from 'baileys'
 import QRCode from 'qrcode'
 
-import { authDir, ensureDirs, qrPngFileFor, qrTxtFile, socketPath, stateDir } from './lib/paths.js'
+import { authDir, ensureDirs, mediaDir, pidFile, qrPngFileFor, qrTxtFile, socketPath, stateDir } from './lib/paths.js'
 import { logger, waLogger } from './lib/logger.js'
-import { Store } from './lib/store.js'
+import { Store, normalizeJid } from './lib/store.js'
 import { Notifier } from './lib/notify.js'
 import { Bus } from './lib/server.js'
-import { isGroupJid, isIgnorableChat, isSilent, messageText, messageType, prettyJid } from './lib/message.js'
+import { extractImage, isGroupJid, isIgnorableChat, isSilent, messageText, messageType, prettyJid } from './lib/message.js'
+import { existingMediaPath, MediaCache } from './lib/media.js'
 
 const RECONNECT_BASE_MS = 2000
 const RECONNECT_MAX_MS = 60000
@@ -43,10 +46,11 @@ const startedAt = Math.floor(Date.now() / 1000)
 
 const store = new Store()
 const notifier = new Notifier()
+const media = new MediaCache()
 const bus = new Bus(socketPath)
 
 let sock = null
-let connection = 'connecting'
+let connection = 'idle'
 let qrVersion = 0
 let hasQr = false
 let currentQrPng = ''
@@ -54,7 +58,8 @@ let currentQrPng = ''
 // from "this pairing attempt was rejected".
 let pairingStartedAt = 0
 let qrCount = 0
-let pairingStopped = false
+let pairingStopped = true
+let pairingWanted = false
 let creds = null
 let needsLogin = false
 let lastError = ''
@@ -62,7 +67,12 @@ let reconnectAttempts = 0
 let reconnectTimer = null
 let connecting = false
 let stopping = false
+let connectGen = 0
+let chatsFlushTimer = null
+let lastStateJson = ''
+let resolvingNames = false
 const groupNames = new Map()
+const wantedChats = new Set()
 
 // Baileys timestamps arrive as number | Long | string depending on where in the
 // protocol they came from.
@@ -75,6 +85,10 @@ function toTs(value) {
   return 0
 }
 
+function isLinked() {
+  return !!(creds?.registered || creds?.me?.id || store.me?.id)
+}
+
 function state() {
   return {
     t: 'state',
@@ -84,7 +98,7 @@ function state() {
     qrVersion,
     qrPng: hasQr ? currentQrPng : '',
     pairingStopped,
-    linked: !!creds?.registered,
+    linked: isLinked(),
     me: store.me,
     unread: store.totalUnread(),
     lastError,
@@ -97,33 +111,69 @@ function snapshot() {
 }
 
 function pushState() {
-  bus.broadcast(state())
+  const next = state()
+  const key = JSON.stringify(next)
+  if (key === lastStateJson) return
+  lastStateJson = key
+  bus.broadcast(next)
 }
 
 function pushChats(limit = 60) {
   bus.broadcast({ t: 'chats', chats: store.chatList(limit), unread: store.totalUnread() })
 }
 
+function pushChatsSoon() {
+  if (chatsFlushTimer) return
+  chatsFlushTimer = setTimeout(() => {
+    chatsFlushTimer = null
+    pushChats()
+  }, 300)
+  chatsFlushTimer.unref?.()
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function senderNameFor(chatJid, message) {
   if (message.key?.fromMe) return store.me?.name || 'You'
   const participant = message.key?.participant || message.participant
   if (isGroupJid(chatJid) && participant) {
-    return store.names.get(jidNormalizedUser(participant))
+    return store.lookupName(participant)
+      || store.lookupName(message.key?.participantPn)
       || message.pushName
       || prettyJid(participant)
   }
-  return store.names.get(chatJid) || message.pushName || prettyJid(chatJid)
+  return store.lookupName(chatJid) || message.pushName || prettyJid(chatJid)
+}
+
+function learnAliasesFromMessage(raw) {
+  const key = raw?.key || {}
+  if (key.remoteJid && (key.remoteJidAlt || key.senderPn)) {
+    store.alias(key.remoteJid, key.remoteJidAlt || key.senderPn)
+  }
+  if (key.senderLid && key.senderPn) store.alias(key.senderLid, key.senderPn)
+  if (key.participant && key.participantPn) store.alias(key.participant, key.participantPn)
+  if (key.participantLid && key.participantPn) store.alias(key.participantLid, key.participantPn)
 }
 
 // Convert a raw Baileys message into the flat shape the panel renders and the
 // store persists.
+function publicMessage(message) {
+  if (!message) return message
+  const { media: _ignored, ...rest } = message
+  return rest
+}
+
 function flatten(chatJid, message) {
   const ts = toTs(message.messageTimestamp)
-  return {
-    id: message.key?.id || `${ts}-${Math.random().toString(36).slice(2, 8)}`,
+  const image = extractImage(message.message)
+  const id = message.key?.id || `${ts}-${Math.random().toString(36).slice(2, 8)}`
+  const flat = {
+    id,
     ts,
     fromMe: !!message.key?.fromMe,
-    text: messageText(message.message),
+    text: image ? (image.caption || messageText(message.message)) : messageText(message.message),
     type: messageType(message.message),
     senderName: senderNameFor(chatJid, message),
     senderJid: message.key?.participant ? jidNormalizedUser(message.key.participant) : '',
@@ -135,6 +185,12 @@ function flatten(chatJid, message) {
       participant: message.key?.participant || undefined
     }
   }
+  if (image) {
+    const { caption, ...payload } = image
+    flat.media = payload
+    flat.imagePath = existingMediaPath({ id, media: payload, imagePath: '' })
+  }
+  return flat
 }
 
 async function resolveGroupName(jid) {
@@ -158,12 +214,14 @@ function ingest(chatJid, raw, { live }) {
   const message = flatten(chatJid, raw)
   if (!message.ts) message.ts = Math.floor(Date.now() / 1000)
 
+  const existed = !!store.findMessage(chatJid, message.id)
+  learnAliasesFromMessage(raw)
   store.upsertMessage(chatJid, message)
   const chat = store.touchChat(chatJid, message)
-  if (!chat.isGroup) store.rememberName(chatJid, raw.pushName || store.names.get(chatJid) || '')
+  if (!chat.isGroup && raw.pushName) store.rememberName(chatJid, raw.pushName)
   resolveGroupName(chatJid)
 
-  if (live && !message.fromMe) {
+  if (live && !existed && !message.fromMe) {
     store.bumpUnread(chatJid)
     if (message.ts >= startedAt) {
       const title = chat.isGroup ? (chat.name || 'Group') : (message.senderName || chat.name)
@@ -172,6 +230,10 @@ function ingest(chatJid, raw, { live }) {
     }
   }
 
+  const chatKey = normalizeJid(chatJid)
+  if (message.media && !message.imagePath && (live || wantedChats.has(chatKey) || wantedChats.has(chatJid))) {
+    media.enqueue(chatJid, message)
+  }
   return message
 }
 
@@ -179,12 +241,10 @@ function applyChatMetadata(rawChats) {
   for (const raw of rawChats || []) {
     const jid = raw?.id
     if (!jid || isIgnorableChat(jid)) continue
+    if (raw.pnJid) store.alias(jid, raw.pnJid)
+    if (raw.lidJid) store.alias(jid, raw.lidJid)
     const chat = store.chat(jid)
-    if (raw.name) {
-      store.rememberName(jid, raw.name)
-      chat.name = raw.name
-      chat.nameLocked = true
-    }
+    if (raw.name) store.rememberName(jid, raw.name)
     if (typeof raw.unreadCount === 'number') chat.unread = Math.max(0, raw.unreadCount)
     if (raw.conversationTimestamp !== undefined) {
       const ts = toTs(raw.conversationTimestamp)
@@ -197,20 +257,80 @@ function applyChatMetadata(rawChats) {
       chat.muted = until > Math.floor(Date.now() / 1000)
     }
   }
+  store.applyNamesToChats()
   store.markDirty()
+}
+
+function asLidJid(value) {
+  if (!value) return ''
+  const raw = String(value)
+  if (raw.includes('@')) return normalizeJid(raw)
+  return `${raw}@lid`
+}
+
+async function resolveContactLids() {
+  if (!sock || connection !== 'open' || resolvingNames) return
+  resolvingNames = true
+  try {
+    const phones = [...store.names.keys()].filter((jid) => jid.endsWith('@s.whatsapp.net'))
+    for (let i = 0; i < phones.length; i += 25) {
+      if (!sock || connection !== 'open') return
+      try {
+        const rows = await sock.onWhatsApp(...phones.slice(i, i + 25))
+        for (const row of rows || []) {
+          if (row?.jid && row?.lid) store.alias(row.jid, asLidJid(row.lid))
+        }
+      } catch (err) {
+        logger.debug({ err }, 'contact lid lookup failed')
+        break
+      }
+    }
+
+    const unknownLids = store.sortedChats()
+      .filter((chat) => chat.jid.endsWith('@lid') && !store.lookupName(chat.jid))
+      .slice(0, 50)
+    if (unknownLids.length) {
+      try {
+        const query = new USyncQuery().withContactProtocol().withLIDProtocol()
+        for (const chat of unknownLids) {
+          query.withUser(new USyncUser().withLid(chat.jid).withId(chat.jid))
+        }
+        const result = await sock.executeUSyncQuery(query)
+        for (const row of result?.list || []) {
+          const lid = asLidJid(row.lid || (String(row.id || '').endsWith('@lid') ? row.id : ''))
+          const pn = String(row.id || '').endsWith('@s.whatsapp.net') ? row.id : ''
+          if (lid && pn) store.alias(lid, pn)
+        }
+      } catch (err) {
+        logger.debug({ err }, 'lid usync failed')
+      }
+    }
+
+    if (store.applyNamesToChats()) {
+      logger.info({ names: store.names.size, aliases: store.aliases.size }, 'resolved contact names')
+      pushChats()
+    }
+  } finally {
+    resolvingNames = false
+  }
 }
 
 function applyContacts(contacts) {
   for (const contact of contacts || []) {
-    if (!contact?.id) continue
+    if (!contact?.id && !contact?.lid && !contact?.jid) continue
+    const ids = [contact.id, contact.lid, contact.jid].filter(Boolean).map((id) => normalizeJid(id) || id)
+    for (let i = 1; i < ids.length; i++) store.alias(ids[0], ids[i])
     const name = contact.name || contact.verifiedName || contact.notify
-    if (name) store.rememberName(jidNormalizedUser(contact.id), name)
+    if (!name) continue
+    for (const id of ids) store.rememberName(id, name)
   }
+  store.applyNamesToChats()
 }
 
 // Open a pairing window. Every QR the daemon shows is counted against it, so an
 // unlinked account cannot keep the pairing endpoint busy indefinitely.
 function startPairing(reason) {
+  pairingWanted = true
   pairingStopped = false
   pairingStartedAt = Date.now()
   qrCount = 0
@@ -218,20 +338,23 @@ function startPairing(reason) {
 }
 
 // Stop refreshing and drop the QR rather than leave an expired code on screen
-// pretending to be scannable. The panel's "Show QR code" button and
-// `omarchy-whatsapp login` both reopen the window.
+// pretending to be scannable. Login in the panel or `omarchy-whatsapp login`
+// both reopen the window.
 function stopPairing() {
+  const shown = qrCount
+  pairingWanted = false
   pairingStopped = true
+  pairingStartedAt = 0
+  qrCount = 0
+  connectGen += 1
+  connecting = false
+  cancelReconnect()
   clearQr()
   connection = 'idle'
   needsLogin = true
-  logger.info({ qrCount }, 'pairing: no scan within the window, pausing QR refresh')
+  logger.info({ qrCount: shown }, 'pairing: no scan within the window, pausing QR refresh')
   pushState()
-  try {
-    sock?.end(new Error('pairing paused'))
-  } catch {
-    // Already closed.
-  }
+  destroySocket('pairing paused')
 }
 
 async function writeQr(qr) {
@@ -284,11 +407,39 @@ function clearQr() {
   removeFile(qrTxtFile)
 }
 
+function cancelReconnect() {
+  if (!reconnectTimer) return
+  clearTimeout(reconnectTimer)
+  reconnectTimer = null
+}
+
+function destroySocket(reason) {
+  const old = sock
+  sock = null
+  if (!old) return
+  try {
+    old.ev?.removeAllListeners?.()
+  } catch {
+    // Already gone.
+  }
+  try {
+    old.end(reason ? new Error(reason) : undefined)
+  } catch {
+    // Already closed.
+  }
+  try {
+    old.ws?.close?.()
+  } catch {
+    // Already closed.
+  }
+}
+
 // `delayOverride` covers the disconnects that are part of normal operation
 // (QR batch ended, post-pair restart). Those must not consume the backoff
 // budget reserved for genuine network trouble.
 function scheduleReconnect(delayOverride, options) {
-  if (stopping || pairingStopped || reconnectTimer) return
+  if (stopping || reconnectTimer || connecting) return
+  if (pairingStopped && !isLinked()) return
   const countsAsFailure = !options || options.countsAsFailure !== false
   const delay = delayOverride !== undefined
     ? delayOverride
@@ -307,15 +458,47 @@ function scheduleReconnect(delayOverride, options) {
 
 async function connect() {
   if (connecting || stopping) return
+  if (!isLinked() && !pairingWanted) {
+    needsLogin = true
+    pairingStopped = true
+    connection = 'idle'
+    pushState()
+    return
+  }
+
   connecting = true
-  connection = 'connecting'
+  connectGen += 1
+  const gen = connectGen
   lastError = ''
-  pushState()
+  if (!isLinked()) {
+    connection = 'connecting'
+    pushState()
+  }
 
   try {
+    destroySocket('replaced')
+    await sleep(400)
+    if (stopping || gen !== connectGen) {
+      if (gen === connectGen) connecting = false
+      return
+    }
+
     const { state: authState, saveCreds } = await useMultiFileAuthState(authDir)
     creds = authState.creds
+    if (!isLinked() && !pairingWanted) {
+      needsLogin = true
+      pairingStopped = true
+      connection = 'idle'
+      connecting = false
+      pushState()
+      return
+    }
+
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }))
+    if (stopping || gen !== connectGen) {
+      if (gen === connectGen) connecting = false
+      return
+    }
 
     sock = makeWASocket({
       version,
@@ -330,41 +513,56 @@ async function connect() {
       browser: Browsers.ubuntu('Omarchy'),
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
+      fireInitQueries: true,
+      connectTimeoutMs: 30000,
+      defaultQueryTimeoutMs: 30000,
       // Link previews and media thumbnails are never rendered here.
       shouldSyncHistoryMessage: () => true
     })
+    const thisSocket = sock
 
-    sock.ev.on('creds.update', saveCreds)
+    sock.ev.on('creds.update', (update) => {
+      if (sock !== thisSocket) return
+      saveCreds(update)
+      creds = { ...creds, ...update }
+    })
 
     sock.ev.on('connection.update', (update) => {
+      if (sock !== thisSocket) return
       const { connection: next, lastDisconnect, qr } = update
       if (qr) writeQr(qr)
 
       if (next === 'open') {
+        connecting = false
         connection = 'open'
         needsLogin = false
+        pairingWanted = false
         pairingStopped = false
         pairingStartedAt = 0
         qrCount = 0
         reconnectAttempts = 0
         lastError = ''
         clearQr()
-        const user = sock.user
+        const user = thisSocket.user
         store.me = user
           ? { id: jidNormalizedUser(user.id), name: user.name || user.verifiedName || prettyJid(user.id) }
-          : null
+          : store.me
+        if (user?.lid && user?.id) store.alias(user.id, user.lid)
         store.markDirty()
         logger.info({ me: store.me?.id }, 'connection: open')
         pushState()
         pushChats()
+        setTimeout(() => {
+          resolveContactLids().catch((err) => logger.debug({ err }, 'contact resolve failed'))
+        }, 1500).unref?.()
         return
       }
 
       if (next === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode
         lastError = lastDisconnect?.error?.message || ''
-        connection = 'close'
         connecting = false
+        if (sock === thisSocket) sock = null
 
         if (statusCode === DisconnectReason.loggedOut) {
           // 401 means two very different things. If this device was actually
@@ -374,20 +572,28 @@ async function connect() {
           if (creds?.registered) {
             logger.warn('connection: device unlinked from the phone, clearing credentials')
             wipeAuth()
+            creds = null
             needsLogin = true
-            startPairing('device unlinked')
+            pairingWanted = false
+            pairingStopped = true
+            connection = 'idle'
+            clearQr()
             pushState()
-            connect().catch((err) => logger.error({ err }, 'connection: relogin failed'))
-          } else {
+            pushChats()
+          } else if (pairingWanted && !pairingStopped) {
             logger.warn('connection: pairing attempt rejected, retrying')
             needsLogin = true
             pushState()
             scheduleReconnect(PAIRING_RETRY_MS, { reason: 'pairing rejected', countsAsFailure: false })
+          } else {
+            needsLogin = true
+            connection = 'idle'
+            pushState()
           }
           return
         }
 
-        if (pairingStopped) {
+        if (pairingStopped && !isLinked()) {
           // Stay 'idle' rather than 'close': nothing is retrying, so reporting a
           // closed connection would read as a fault instead of a paused pairing.
           connection = 'idle'
@@ -398,27 +604,31 @@ async function connect() {
         // Both of these are routine, not faults.
         if (statusCode === DisconnectReason.restartRequired) {
           logger.info('connection: restart required, reconnecting immediately')
-          pushState()
           scheduleReconnect(RESTART_RETRY_MS, { reason: 'restart required', countsAsFailure: false })
           return
         }
 
-        if (needsLogin && statusCode === DisconnectReason.timedOut) {
+        if (needsLogin && pairingWanted && statusCode === DisconnectReason.timedOut) {
           // Baileys uses 408 for both "QR refs ended" and "connection lost";
           // while unlinked and mid-pairing it is always the former.
           logger.info('connection: QR batch ended, requesting a fresh one')
-          pushState()
           scheduleReconnect(PAIRING_RETRY_MS, { reason: 'qr batch ended', countsAsFailure: false })
           return
         }
 
+        if (statusCode === DisconnectReason.connectionReplaced) {
+          logger.warn('connection: session replaced, waiting before retry')
+          scheduleReconnect(8000, { reason: 'session replaced' })
+          return
+        }
+
         logger.warn({ statusCode, lastError }, 'connection: closed')
-        pushState()
         scheduleReconnect()
       }
     })
 
     sock.ev.on('messaging-history.set', ({ chats, contacts, messages, isLatest }) => {
+      if (sock !== thisSocket) return
       applyContacts(contacts)
       applyChatMetadata(chats)
       for (const raw of messages || []) {
@@ -426,87 +636,126 @@ async function connect() {
         if (jid) ingest(jid, raw, { live: false })
       }
       logger.info({ chats: chats?.length || 0, messages: messages?.length || 0, isLatest }, 'history sync')
-      pushChats()
-      pushState()
+      for (const [jid, list] of store.messages) {
+        if (!wantedChats.has(jid) && !wantedChats.has(normalizeJid(jid))) continue
+        for (const message of list) {
+          if (message.media && !existingMediaPath(message)) media.enqueue(jid, message)
+        }
+      }
+      pushChatsSoon()
     })
 
     sock.ev.on('chats.upsert', (chats) => {
+      if (sock !== thisSocket) return
       applyChatMetadata(chats)
-      pushChats()
+      pushChatsSoon()
     })
 
     sock.ev.on('chats.update', (updates) => {
+      if (sock !== thisSocket) return
       applyChatMetadata(updates)
-      pushChats()
-      pushState()
+      pushChatsSoon()
     })
 
     sock.ev.on('chats.delete', (jids) => {
+      if (sock !== thisSocket) return
       for (const jid of jids || []) {
         store.chats.delete(jid)
         store.messages.delete(jid)
       }
       store.markDirty()
-      pushChats()
-      pushState()
+      pushChatsSoon()
+    })
+
+    sock.ev.on('chats.phoneNumberShare', ({ lid, jid }) => {
+      if (sock !== thisSocket) return
+      if (lid && jid) {
+        store.alias(lid, jid)
+        store.applyNamesToChats()
+        pushChatsSoon()
+      }
     })
 
     sock.ev.on('contacts.upsert', (contacts) => {
+      if (sock !== thisSocket) return
       applyContacts(contacts)
-      pushChats()
+      pushChatsSoon()
     })
 
     sock.ev.on('contacts.update', (contacts) => {
+      if (sock !== thisSocket) return
       applyContacts(contacts)
-      pushChats()
+      pushChatsSoon()
     })
 
     sock.ev.on('groups.update', (updates) => {
+      if (sock !== thisSocket) return
       for (const update of updates || []) {
         if (update?.id && update.subject) store.rememberName(update.id, update.subject)
       }
-      pushChats()
+      pushChatsSoon()
     })
 
     sock.ev.on('messages.upsert', ({ messages, type }) => {
+      if (sock !== thisSocket) return
       const live = type === 'notify'
+      const before = store.totalUnread()
       for (const raw of messages || []) {
         const jid = raw?.key?.remoteJid
         if (!jid) continue
+        const existed = !!store.findMessage(jid, raw?.key?.id)
         const message = ingest(jid, raw, { live })
         if (!message) continue
+        // History / media retries must not shove old rows into an open chat.
+        if (!live && existed) continue
+        if (!live) continue
         bus.broadcast({
           t: 'message',
           jid,
-          message,
+          message: publicMessage(message),
           chat: store.chat(jid),
           unread: store.totalUnread()
         })
       }
-      pushChats()
-      pushState()
+      const unreadChanged = store.totalUnread() !== before
+      pushChatsSoon()
+      if (unreadChanged) pushState()
     })
 
     sock.ev.on('messages.update', (updates) => {
+      if (sock !== thisSocket) return
       for (const update of updates || []) {
         const jid = update?.key?.remoteJid
         const id = update?.key?.id
         if (!jid || !id) continue
-        const list = store.messages.get(jid)
-        if (!list) continue
-        const found = list.find((m) => m.id === id)
+        const found = store.findMessage(jid, id)
         if (!found) continue
         const status = update.update?.status
-        if (typeof status === 'number') {
-          found.status = status
-          store.markDirty()
-          bus.broadcast({ t: 'messageStatus', jid, id, status })
-        }
+        if (typeof status !== 'number') continue
+        if (status < (found.status || 0)) continue
+        found.status = status
+        store.markDirty()
+        bus.broadcast({ t: 'messageStatus', jid: found.key?.remoteJid || jid, id, status })
       }
     })
 
-    connecting = false
+    sock.ev.on('message-receipt.update', (updates) => {
+      if (sock !== thisSocket) return
+      for (const update of updates || []) {
+        const jid = update?.key?.remoteJid
+        const id = update?.key?.id
+        if (!jid || !id) continue
+        const found = store.findMessage(jid, id)
+        if (!found) continue
+        const next = update.receipt?.readTimestamp ? 4 : (update.receipt?.receiptTimestamp ? 3 : 0)
+        if (!next || next < (found.status || 0)) continue
+        found.status = next
+        store.markDirty()
+        bus.broadcast({ t: 'messageStatus', jid: found.key?.remoteJid || jid, id, status: next })
+      }
+    })
   } catch (err) {
+    if (gen !== connectGen) return
     connecting = false
     lastError = String(err?.message || err)
     logger.error({ err }, 'connection: setup failed')
@@ -524,6 +773,11 @@ function wipeAuth() {
   ensureDirs()
   store.clear()
   groupNames.clear()
+  try {
+    rmSync(mediaDir, { recursive: true, force: true })
+  } catch {
+    // Cache may already be gone.
+  }
 }
 
 // Mark a chat read on this device and across the account, then drop any toast
@@ -533,7 +787,7 @@ async function markRead(jid) {
   store.setUnread(jid, 0)
   pushChats()
   pushState()
-  if (!sock || connection !== 'open') return
+  if (!sock || connection !== 'open' || connecting) return
 
   const list = store.messages.get(jid) || []
   const unreadKeys = list.filter((m) => !m.fromMe).slice(-20).map((m) => m.key).filter((k) => k?.id)
@@ -558,6 +812,23 @@ async function markRead(jid) {
   }
 }
 
+async function refreshMissingImages(jid, list) {
+  if (!sock || connection !== 'open') return
+  if (typeof sock.requestPlaceholderResend !== 'function') return
+  const missing = list.filter((message) => (
+    (message.type === 'imageMessage' || message.type === 'stickerMessage')
+    && !message.media
+    && message.key?.id
+  ))
+  for (const message of missing.slice(-12)) {
+    try {
+      await sock.requestPlaceholderResend(message.key)
+    } catch (err) {
+      logger.debug({ err, id: message.id }, 'media: placeholder resend failed')
+    }
+  }
+}
+
 async function handleCommand(payload, reply) {
   const { t, id } = payload
   switch (t) {
@@ -575,12 +846,23 @@ async function handleCommand(payload, reply) {
 
     case 'messages':
       if (!payload.jid) throw new Error('messages: jid required')
-      reply({
-        t: 'messages',
-        jid: payload.jid,
-        chat: store.chat(payload.jid),
-        messages: store.messageList(payload.jid, payload.limit || 60)
-      })
+      {
+        const list = store.messageList(payload.jid, payload.limit || 60)
+        wantedChats.add(payload.jid)
+        wantedChats.add(normalizeJid(payload.jid))
+        reply({
+          t: 'messages',
+          jid: payload.jid,
+          chat: store.chat(payload.jid),
+          messages: list.map(publicMessage)
+        })
+        for (const message of list) {
+          if (message.media && !existingMediaPath(message)) media.enqueue(payload.jid, message)
+        }
+        refreshMissingImages(payload.jid, list).catch((err) => {
+          logger.debug({ err, jid: payload.jid }, 'media: history refresh failed')
+        })
+      }
       return
 
     case 'send': {
@@ -603,7 +885,7 @@ async function handleCommand(payload, reply) {
       if (sent) {
         const message = ingest(jid, sent, { live: false })
         if (message) {
-          bus.broadcast({ t: 'message', jid, message, chat: store.chat(jid), unread: store.totalUnread() })
+          bus.broadcast({ t: 'message', jid, message: publicMessage(message), chat: store.chat(jid), unread: store.totalUnread() })
           pushChats()
         }
       }
@@ -649,14 +931,23 @@ async function handleCommand(payload, reply) {
       return
     }
 
+    case 'login':
+      if (isLinked() && connection === 'open') {
+        reply({ t: 'ack', id, ok: true, already: true })
+        return
+      }
+      reconnectAttempts = 0
+      cancelReconnect()
+      startPairing('user login')
+      connecting = false
+      await connect()
+      reply({ t: 'ack', id, ok: true })
+      return
+
     case 'reconnect':
       reconnectAttempts = 0
-      startPairing('manual reconnect')
-      try {
-        sock?.end(new Error('manual reconnect'))
-      } catch {
-        // Socket was already dead.
-      }
+      cancelReconnect()
+      if (!isLinked()) startPairing('manual reconnect')
       connecting = false
       await connect()
       reply({ t: 'ack', id, ok: true })
@@ -668,14 +959,18 @@ async function handleCommand(payload, reply) {
       } catch (err) {
         logger.debug({ err }, 'logout call failed, clearing local state anyway')
       }
+      cancelReconnect()
+      destroySocket('logout')
       wipeAuth()
+      creds = null
       needsLogin = true
-      startPairing('logout')
-      connection = 'close'
+      pairingWanted = false
+      pairingStopped = true
+      connection = 'idle'
+      connecting = false
+      clearQr()
       pushState()
       pushChats()
-      connecting = false
-      await connect()
       reply({ t: 'ack', id, ok: true })
       return
 
@@ -688,14 +983,11 @@ function shutdown(signal) {
   if (stopping) return
   stopping = true
   logger.info({ signal }, 'shutting down')
+  cancelReconnect()
   notifier.cancelAll()
   store.persist()
   bus.close()
-  try {
-    sock?.end(new Error('shutdown'))
-  } catch {
-    // Already closed.
-  }
+  destroySocket('shutdown')
   setTimeout(() => process.exit(0), 200).unref?.()
 }
 
@@ -711,10 +1003,38 @@ function purgeStaleQrFiles() {
   }
 }
 
+function claimPid() {
+  let displaced = false
+  try {
+    const old = Number(readFileSync(pidFile, 'utf8'))
+    if (old && old !== process.pid) {
+      try {
+        process.kill(old, 0)
+        logger.warn({ pid: old }, 'startup: stopping leftover daemon that would fight this session')
+        process.kill(old, 'SIGTERM')
+        displaced = true
+      } catch {
+        // Already gone.
+      }
+    }
+  } catch {
+    // No pid file yet.
+  }
+  writeFileSync(pidFile, String(process.pid), { mode: 0o600 })
+  return displaced
+}
+
 async function main() {
   ensureDirs()
+  if (claimPid()) await sleep(1500)
   purgeStaleQrFiles()
   store.load()
+
+  media.getSocket = () => sock
+  media.onReady = (jid, message) => {
+    store.markDirty()
+    bus.broadcast({ t: 'messageMedia', jid, id: message.id, imagePath: message.imagePath || '' })
+  }
 
   bus.snapshot = snapshot
   bus.onCommand = handleCommand
@@ -728,12 +1048,23 @@ async function main() {
     throw err
   }
 
-  startPairing('daemon start')
+  try {
+    const { state: authState } = await useMultiFileAuthState(authDir)
+    creds = authState.creds
+  } catch (err) {
+    logger.warn({ err }, 'startup: could not read auth state')
+  }
+
+  needsLogin = !isLinked()
+  pairingWanted = false
+  pairingStopped = needsLogin
+  connection = needsLogin ? 'idle' : 'connecting'
+  pushState()
 
   // The window is otherwise only tested when the next QR arrives, and WhatsApp's
   // first ref lives for a minute, so the pause would land late.
   const pairingWatchdog = setInterval(() => {
-    if (stopping || pairingStopped) return
+    if (stopping || pairingStopped || !pairingWanted) return
     if (!needsLogin || connection === 'open') return
     if (pairingStartedAt === 0) return
     if (Date.now() - pairingStartedAt > PAIRING_WINDOW_MS) stopPairing()
@@ -744,7 +1075,7 @@ async function main() {
   process.on('uncaughtException', (err) => logger.error({ err }, 'uncaught exception'))
   process.on('unhandledRejection', (err) => logger.error({ err }, 'unhandled rejection'))
 
-  await connect()
+  if (!needsLogin) await connect()
 }
 
 main().catch((err) => {

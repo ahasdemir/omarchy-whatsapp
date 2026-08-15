@@ -13,8 +13,7 @@ PLUGIN_ID="$(sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$WA_R
 # so whichever one the shell opens is already on the right conversation.
 "$WA_BIN_DIR/omarchy-whatsapp-ctl" focus "$1" >/dev/null 2>&1 || true
 
-# Let the shell pick which panel to show. Opening every bar instance directly
-# would pop a panel on every monitor at once.
+# Open the bar panel. -q so a missing IPC method is not a hard failure.
 if command -v omarchy-shell >/dev/null 2>&1 && [[ -n $PLUGIN_ID ]]; then
-  omarchy-shell shell summon "$PLUGIN_ID" '{}' >/dev/null 2>&1 || true
+  omarchy-shell -q shell summon "$PLUGIN_ID" "{}" >/dev/null 2>&1 || true
 fi

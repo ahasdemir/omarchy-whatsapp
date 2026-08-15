@@ -62,6 +62,10 @@ function sameDay(a, b) {
   return startOfDay(new Date(a * 1000)) === startOfDay(new Date(b * 1000))
 }
 
+function isPhotoPlaceholder(text) {
+  return /^[\uf03e\uf118]?\s*(Photo|Sticker)?$/i.test(String(text || "").trim())
+}
+
 function chatTitle(chat) {
   if (!chat) return ""
   return chat.name || prettyJid(chat.jid)
@@ -69,8 +73,12 @@ function chatTitle(chat) {
 
 function prettyJid(jid) {
   if (!jid) return ""
-  var user = String(jid).split("@")[0].split(":")[0]
+  var parts = String(jid).split("@")
+  var user = parts[0].split(":")[0]
+  var server = parts.length > 1 ? parts[1] : ""
   if (!user) return String(jid)
+  if (server === "g.us") return "Group"
+  if (server === "lid") return user
   return /^\d{6,}$/.test(user) ? "+" + user : user
 }
 
@@ -86,14 +94,16 @@ function chatPreview(chat) {
 }
 
 // Baileys status enum: 1 pending, 2 server ack, 3 delivered, 4 read, 5 played.
+// Two nf-fa-check glyphs, not nf-fa-check-double: that codepoint is a copy
+// icon in a lot of Nerd Fonts, so "delivered" was rendering as one tick.
 function statusGlyph(status) {
   switch (status | 0) {
     case 0:
-    case 1: return "\uf017"     // clock
-    case 2: return "\uf00c"     // check
-    case 3: return "\uf560"     // double check
+    case 1: return "\uf017"
+    case 2: return "\uf00c"
+    case 3:
     case 4:
-    case 5: return "\uf560"
+    case 5: return "\uf00c\uf00c"
     default: return ""
   }
 }
@@ -103,19 +113,17 @@ function statusIsRead(status) {
 }
 
 function connectionLabel(state, needsLogin, daemonOnline, pairingStopped) {
-  if (!daemonOnline) return "Daemon offline"
-  if (pairingStopped) return "QR paused"
-  if (needsLogin) return "Not linked"
-  switch (state) {
-    case "open": return "Connected"
-    case "connecting": return "Connecting\u2026"
-    case "qr": return "Waiting for scan"
-    case "close": return "Reconnecting\u2026"
-    case "idle": return "Idle"
-    default: return state ? String(state) : "Unknown"
+  if (needsLogin) {
+    if (state === "qr") return "Scan QR"
+    if (pairingStopped) return "Not linked"
+    if (state === "connecting") return "Starting login\u2026"
+    return "Not linked"
   }
+  if (!daemonOnline) return "Offline"
+  if (state === "open") return "Connected"
+  return "Connected"
 }
 
 function isReady(state, needsLogin, daemonOnline) {
-  return daemonOnline === true && needsLogin !== true && state === "open"
+  return needsLogin !== true && (state === "open" || daemonOnline === true)
 }

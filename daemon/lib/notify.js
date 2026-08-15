@@ -22,6 +22,11 @@ function hasCommand(name) {
 
 const useOmarchy = hasCommand('omarchy-notification-send')
 const canNotify = useOmarchy || hasCommand('notify-send')
+const soundPlayer = ['paplay', 'pw-play', 'canberra-gtk-play'].find((name) => hasCommand(name))
+const soundFile = [
+  '/usr/share/sounds/freedesktop/stereo/message-new-instant.oga',
+  '/usr/share/sounds/freedesktop/stereo/message.oga'
+].find((path) => existsSync(path))
 
 // Single-quote for `sh -c`: the shell hint is executed as a command string, so
 // a jid is escaped even though jids never legitimately contain a quote.
@@ -63,6 +68,20 @@ export class Notifier {
       ? `${entry.lines[entry.lines.length - 1]}\n(+${entry.lines.length - 1} more)`
       : entry.lines[0]
     this.send(entry.title, body, jid)
+    this.playSound()
+  }
+
+  playSound() {
+    if (process.env.OMARCHY_WHATSAPP_NO_SOUND === '1') return
+    if (!soundPlayer || !soundFile) return
+    const args = soundPlayer === 'canberra-gtk-play' ? ['-f', soundFile] : [soundFile]
+    try {
+      const child = spawn(soundPlayer, args, { stdio: 'ignore', detached: true })
+      child.on('error', (err) => logger.debug({ err }, 'notify: sound failed'))
+      child.unref()
+    } catch (err) {
+      logger.debug({ err }, 'notify: sound threw')
+    }
   }
 
   // Drop everything still buffered — used when the user opens the chat before
@@ -81,7 +100,9 @@ export class Notifier {
   send(title, body, jid) {
     if (!this.enabled) return
     // Clicking the toast opens the bar panel on the originating chat.
-    const openCommand = jid ? `${shellQuote(focusPath)} ${shellQuote(jid)}` : ''
+    const openCommand = jid
+      ? `bash ${shellQuote(focusPath)} ${shellQuote(jid)}`
+      : ''
     const args = useOmarchy
       ? [
         '--app-name', 'WhatsApp',

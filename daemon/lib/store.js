@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { storeFile } from './paths.js'
 import { logger } from './logger.js'
 import { isGroupJid, prettyJid } from './message.js'
@@ -6,6 +6,22 @@ import { isGroupJid, prettyJid } from './message.js'
 const MAX_MESSAGES_PER_CHAT = 200
 const MAX_CHATS = 300
 const PERSIST_DEBOUNCE_MS = 2000
+
+export function normalizeJid(jid) {
+  if (!jid) return ''
+  const [user, server] = String(jid).split('@')
+  if (!user) return String(jid)
+  const bare = user.split(':')[0]
+  return server ? `${bare}@${server}` : bare
+}
+
+export function isPlaceholderName(name) {
+  if (!name) return true
+  const value = String(name).trim()
+  if (!value || value === 'Group' || value === 'Unknown') return true
+  if (/^[+]?[\d\s-]{6,}$/.test(value)) return true
+  return false
+}
 
 // In-memory chat/message state with a JSON snapshot on disk. Baileys ships no
 // store since v6, and the panel needs something to render the instant it
@@ -18,6 +34,8 @@ export class Store {
     this.messages = new Map()
     /** @type {Map<string, string>} */
     this.names = new Map()
+    /** @type {Map<string, string>} */
+    this.aliases = new Map()
     this.me = null
     this._persistTimer = null
     this._dirty = false
@@ -38,8 +56,20 @@ export class Store {
         if (Array.isArray(list)) this.messages.set(jid, list.slice(-MAX_MESSAGES_PER_CHAT))
       }
       for (const [jid, name] of Object.entries(data.names || {})) this.names.set(jid, name)
+      for (const [from, to] of Object.entries(data.aliases || {})) this.aliases.set(from, to)
       this.me = data.me || null
-      logger.info({ chats: this.chats.size }, 'store: snapshot loaded')
+      for (const list of this.messages.values()) {
+        for (const message of list) {
+          if (message.imagePath && !existsSync(message.imagePath)) message.imagePath = ''
+        }
+      }
+      this.applyNamesToChats()
+      for (const chat of this.chats.values()) {
+        if (String(chat.jid).endsWith('@lid') && isPlaceholderName(chat.name)) {
+          chat.name = prettyJid(chat.jid)
+        }
+      }
+      logger.info({ chats: this.chats.size, names: this.names.size }, 'store: snapshot loaded')
     } catch (err) {
       logger.warn({ err }, 'store: corrupt snapshot, starting empty')
     }
@@ -65,11 +95,12 @@ export class Store {
       if (list?.length) messages[chat.jid] = list.slice(-MAX_MESSAGES_PER_CHAT)
     }
     const payload = {
-      version: 1,
+      version: 2,
       me: this.me,
       chats,
       messages,
-      names: Object.fromEntries(this.names)
+      names: Object.fromEntries(this.names),
+      aliases: Object.fromEntries(this.aliases)
     }
     const tmp = `${storeFile}.tmp`
     try {
@@ -83,29 +114,86 @@ export class Store {
   }
 
   rememberName(jid, name) {
-    if (!jid || !name) return
-    const clean = String(name).trim()
-    if (!clean) return
-    if (this.names.get(jid) === clean) return
-    this.names.set(jid, clean)
-    const chat = this.chats.get(jid)
-    if (chat && !chat.nameLocked) {
-      chat.name = clean
-      this.markDirty()
+    if (!jid || !name) return false
+    const key = normalizeJid(jid)
+    const clean = String(name).trim().replace(/[\u200e\u200f\u202a-\u202e]/g, '')
+    if (!key || !clean) return false
+
+    const existing = this.names.get(key)
+    if (existing === clean) {
+      this._applyName(key, clean)
+      return false
     }
+    if (existing && !isPlaceholderName(existing) && isPlaceholderName(clean)) return false
+
+    this.names.set(key, clean)
+    const aliased = this.aliases.get(key)
+    if (aliased && (isPlaceholderName(this.names.get(aliased)) || !this.names.get(aliased))) {
+      this.names.set(aliased, clean)
+    }
+    this._applyName(key, clean)
+    if (aliased) this._applyName(aliased, clean)
+    this.markDirty()
+    return true
+  }
+
+  alias(a, b) {
+    const left = normalizeJid(a)
+    const right = normalizeJid(b)
+    if (!left || !right || left === right) return false
+    if (this.aliases.get(left) === right && this.aliases.get(right) === left) return false
+    this.aliases.set(left, right)
+    this.aliases.set(right, left)
+    const name = this.lookupName(left) || this.lookupName(right)
+    if (name) {
+      this.rememberName(left, name)
+      this.rememberName(right, name)
+    }
+    this.markDirty()
+    return true
+  }
+
+  lookupName(jid) {
+    const key = normalizeJid(jid)
+    if (!key) return ''
+    return this.names.get(key) || this.names.get(this.aliases.get(key) || '') || ''
   }
 
   displayName(jid) {
-    return this.names.get(jid) || prettyJid(jid)
+    return this.lookupName(jid) || prettyJid(jid)
+  }
+
+  _applyName(jid, name) {
+    const chat = this.chats.get(jid)
+    if (!chat) return
+    if (chat.nameLocked && !isPlaceholderName(chat.name)) return
+    if (chat.name === name) return
+    chat.name = name
+    if (!isPlaceholderName(name)) chat.nameLocked = false
+  }
+
+  applyNamesToChats() {
+    let changed = false
+    for (const chat of this.chats.values()) {
+      const resolved = this.lookupName(chat.jid)
+      if (!resolved) continue
+      if (chat.name === resolved) continue
+      if (chat.nameLocked && !isPlaceholderName(chat.name)) continue
+      chat.name = resolved
+      changed = true
+    }
+    if (changed) this.markDirty()
+    return changed
   }
 
   chat(jid) {
-    let chat = this.chats.get(jid)
+    const key = normalizeJid(jid) || jid
+    let chat = this.chats.get(key)
     if (!chat) {
       chat = {
-        jid,
-        name: this.displayName(jid),
-        isGroup: isGroupJid(jid),
+        jid: key,
+        name: this.displayName(key),
+        isGroup: isGroupJid(key),
         unread: 0,
         muted: false,
         archived: false,
@@ -115,8 +203,11 @@ export class Store {
         lastFromMe: false,
         lastSender: ''
       }
-      this.chats.set(jid, chat)
+      this.chats.set(key, chat)
       this.markDirty()
+    } else if (isPlaceholderName(chat.name)) {
+      const resolved = this.lookupName(key)
+      if (resolved && resolved !== chat.name) chat.name = resolved
     }
     return chat
   }
@@ -125,7 +216,8 @@ export class Store {
   // so out-of-order delivery (history sync racing live traffic) still renders
   // in the right order.
   upsertMessage(jid, message) {
-    const list = this.messages.get(jid) || []
+    const key = normalizeJid(jid) || jid
+    const list = this.messages.get(key) || this.messages.get(jid) || []
     const existing = list.findIndex((m) => m.id === message.id)
     if (existing !== -1) {
       list[existing] = { ...list[existing], ...message }
@@ -134,7 +226,7 @@ export class Store {
       list.sort((a, b) => a.ts - b.ts)
       if (list.length > MAX_MESSAGES_PER_CHAT) list.splice(0, list.length - MAX_MESSAGES_PER_CHAT)
     }
-    this.messages.set(jid, list)
+    this.messages.set(key, list)
     this.markDirty()
     return list
   }
@@ -192,14 +284,30 @@ export class Store {
   }
 
   messageList(jid, limit = 60) {
-    const list = this.messages.get(jid) || []
+    const list = this.messages.get(normalizeJid(jid) || jid) || this.messages.get(jid) || []
     return list.slice(-Math.max(1, limit))
+  }
+
+  findMessage(jid, id) {
+    if (!id) return null
+    const keys = [jid, normalizeJid(jid), this.aliases.get(normalizeJid(jid) || jid)].filter(Boolean)
+    for (const key of keys) {
+      const list = this.messages.get(key)
+      const found = list?.find((m) => m.id === id)
+      if (found) return found
+    }
+    for (const list of this.messages.values()) {
+      const found = list.find((m) => m.id === id)
+      if (found) return found
+    }
+    return null
   }
 
   clear() {
     this.chats.clear()
     this.messages.clear()
     this.names.clear()
+    this.aliases.clear()
     this.me = null
     this._dirty = true
     this.persist()
