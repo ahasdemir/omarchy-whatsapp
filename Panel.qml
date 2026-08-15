@@ -27,6 +27,7 @@ Panel {
   property int cursorIndex: 0
   property string statusLine: ""
   property bool pinToLatest: true
+  property bool logoutConfirmOpen: false
 
   readonly property var chats: client ? client.chats : []
   readonly property bool daemonOnline: client ? client.daemonOnline : false
@@ -90,7 +91,19 @@ Panel {
     Qt.callLater(function () { keyCatcher.forceActiveFocus() })
   }
 
-  function logout() {
+  function requestLogout() {
+    logoutConfirm.selectedIndex = 1
+    root.logoutConfirmOpen = true
+    Qt.callLater(function () { logoutConfirm.forceActiveFocus() })
+  }
+
+  function cancelLogout() {
+    root.logoutConfirmOpen = false
+    Qt.callLater(function () { keyCatcher.forceActiveFocus() })
+  }
+
+  function confirmLogout() {
+    root.logoutConfirmOpen = false
     if (root.client) root.client.logout()
     root.back()
     root.statusLine = ""
@@ -253,10 +266,14 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      // The composer owns every key while it has focus, including j/k/x.
-      blocked: composer.activeFocus
+      // Composer and the logout confirm own keys while they are up.
+      blocked: composer.activeFocus || root.logoutConfirmOpen
 
-      onCloseRequested: root.view === "chat" ? root.back() : root.close()
+      onCloseRequested: {
+        if (root.logoutConfirmOpen) root.cancelLogout()
+        else if (root.view === "chat") root.back()
+        else root.close()
+      }
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) { root.moveCursor(dy) }
       onActivateRequested: root.activateCursor()
@@ -364,7 +381,7 @@ Panel {
               foreground: root.barForeground
               hoverColor: root.bar ? root.bar.urgent : Color.urgent
               fontFamily: root.fontFamily
-              onClicked: root.logout()
+              onClicked: root.requestLogout()
             }
           }
         }
@@ -740,6 +757,24 @@ Panel {
               onClicked: root.sendReply()
             }
           }
+        }
+      }
+
+      ConfirmDialog {
+        id: logoutConfirm
+        anchors.fill: parent
+        opened: root.logoutConfirmOpen
+        z: 10
+        focus: opened
+        message: "Log out and unlink this device?"
+        confirmText: "Log out"
+        foreground: root.barForeground
+        fontFamily: root.fontFamily
+        onCanceled: root.cancelLogout()
+        onConfirmed: root.confirmLogout()
+
+        Keys.onPressed: function (event) {
+          if (handleKey(event)) event.accepted = true
         }
       }
     }
