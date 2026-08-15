@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# omarchy:summary=Link WhatsApp to Omarchy by scanning a QR code in the terminal
+# omarchy:args=[--pair <phone-number>]
+
+source "$(dirname "$(readlink -f "$0")")/_common.sh"
+
+NODE="$(wa_node)"
+CTL=("$NODE" "$WA_DAEMON_DIR/ctl.js")
+QR_FILE="$WA_STATE_DIR/qr.txt"
+
+pair_phone=""
+while (($# > 0)); do
+  case $1 in
+  --pair)
+    [[ -n ${2:-} ]] || wa_die "--pair needs a phone number in international format, e.g. --pair 919812345678"
+    pair_phone="$2"
+    shift 2
+    ;;
+  -h | --help)
+    echo "Usage: omarchy-whatsapp login [--pair <phone-number>]"
+    echo
+    echo "Scans a QR code by default. --pair asks WhatsApp for an 8-digit code"
+    echo "you type into Linked devices > Link with phone number instead."
+    exit 0
+    ;;
+  *) wa_die "unknown argument: $1" ;;
+  esac
+done
+
+start_daemon() {
+  if systemctl --user list-unit-files omarchy-whatsapp.service >/dev/null 2>&1 &&
+    systemctl --user cat omarchy-whatsapp.service >/dev/null 2>&1; then
+    systemctl --user start omarchy-whatsapp.service
+  else
+    setsid "$WA_BIN_DIR/omarchy-whatsapp-daemon" >/dev/null 2>&1 &
+  fi
+}
+
+status_field() {
+  "${CTL[@]}" status 2>/dev/null | "$NODE" -e "
+    let raw = ''
+    process.stdin.on('data', (c) => { raw += c })
+    process.stdin.on('end', () => {
+      let value = ''
+      try {
+        const state = JSON.parse(raw)
+        value = state['$1']
+        // \`me\` is an object; show something a human can read.
+        if (value && typeof value === 'object') value = value.name || value.id || ''
+      } catch { value = '' }
+      process.stdout.write(String(value ?? ''))
+    })
+  "
+}
+
+if ! wa_daemon_running; then
+  echo "Starting the WhatsApp daemon..."
+  start_daemon
+  for _ in {1..40}; do
+    wa_daemon_running && break
+    sleep 0.25
+  done
+  wa_daemon_running || wa_die "daemon did not come up. Check: journalctl --user -u omarchy-whatsapp -n 50"
+fi
+
+if [[ $(status_field connection) == "open" ]]; then
+  echo "Already linked as $(status_field me | head -c 80)."
+  echo "Run 'omarchy-whatsapp-ctl logout' first if you want to link a different account."
+  exit 0
+fi
+
+if [[ -n $pair_phone ]]; then
+  echo "Requesting a pairing code for +$pair_phone ..."
+  # WhatsApp only issues a pairing code once the socket has reached the
+  # pre-login stage, which is also when the first QR is generated.
+  for _ in {1..40}; do
+    [[ -f $QR_FILE ]] && break
+    sleep 0.25
+  done
+  "${CTL[@]}" pair "$pair_phone"
+  echo
+  echo "On your phone: WhatsApp > Settings > Linked devices > Link a device >"
+  echo "Link with phone number instead, then type the code above."
+else
+  echo "Waiting for a QR code..."
+  last_stamp=""
+  printed=0
+  for _ in {1..240}; do
+    if [[ $(status_field connection) == "open" ]]; then
+      echo
+      echo "Linked. WhatsApp is live in your bar."
+      exit 0
+    fi
+    if [[ -f $QR_FILE ]]; then
+      stamp="$(stat -c %Y "$QR_FILE" 2>/dev/null || echo 0)"
+      if [[ $stamp != "$last_stamp" ]]; then
+        last_stamp="$stamp"
+        printed=1
+        clear
+        echo "Scan this with WhatsApp > Settings > Linked devices > Link a device"
+        echo "(the code refreshes every ~20s; this screen refreshes with it)"
+        echo
+        cat "$QR_FILE"
+      fi
+    fi
+    sleep 1
+  done
+  ((printed)) || wa_die "no QR code appeared. Check: journalctl --user -u omarchy-whatsapp -n 50"
+  wa_die "timed out waiting for the scan"
+fi

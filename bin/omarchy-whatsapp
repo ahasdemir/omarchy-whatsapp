@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# omarchy:summary=WhatsApp for Omarchy: login, status, send, open, service control
+# omarchy:args=<login|status|send|open|start|stop|restart|logs|logout|ctl> [args]
+
+source "$(dirname "$(readlink -f "$0")")/_common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: omarchy-whatsapp <command> [args]
+
+  login [--pair <phone>]   link this device (QR by default)
+  status                   connection state and unread count
+  send <jid> <text...>     send a message from the terminal
+  open                     open the full WhatsApp Web client
+  focus <jid>              open the bar panel on a chat
+  start | stop | restart   control the user service
+  logs [-f]                daemon journal
+  logout                   unlink this device and wipe local credentials
+  ctl <...>                raw daemon commands (see omarchy-whatsapp-ctl -h)
+EOF
+}
+
+command="${1:-}"
+[[ $# -gt 0 ]] && shift || true
+
+case $command in
+login) exec "$WA_BIN_DIR/omarchy-whatsapp-login" "$@" ;;
+open) exec "$WA_BIN_DIR/omarchy-whatsapp-open" "$@" ;;
+focus) exec "$WA_BIN_DIR/omarchy-whatsapp-focus" "$@" ;;
+status | send | logout | reconnect | read | chats | messages | pair | ping)
+  exec "$WA_BIN_DIR/omarchy-whatsapp-ctl" "$command" "$@"
+  ;;
+ctl) exec "$WA_BIN_DIR/omarchy-whatsapp-ctl" "$@" ;;
+start) exec systemctl --user start omarchy-whatsapp.service ;;
+stop) exec systemctl --user stop omarchy-whatsapp.service ;;
+restart) exec systemctl --user restart omarchy-whatsapp.service ;;
+logs) exec journalctl --user -u omarchy-whatsapp.service -n 100 "$@" ;;
+daemon) exec "$WA_BIN_DIR/omarchy-whatsapp-daemon" "$@" ;;
+-h | --help | "") usage ;;
+*)
+  usage >&2
+  wa_die "unknown command: $command"
+  ;;
+esac

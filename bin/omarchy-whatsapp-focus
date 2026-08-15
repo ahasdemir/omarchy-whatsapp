@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# omarchy:summary=Open a WhatsApp chat in the bar panel (used by notification clicks)
+# omarchy:args=<jid>
+
+source "$(dirname "$(readlink -f "$0")")/_common.sh"
+
+[[ -n ${1:-} ]] || wa_die "usage: omarchy-whatsapp-focus <jid>"
+
+PLUGIN_ID="$(sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$WA_ROOT/manifest.json" | head -1)"
+
+# Tell the daemon first: it broadcasts the target chat to every connected panel,
+# so whichever one the shell opens is already on the right conversation.
+"$WA_BIN_DIR/omarchy-whatsapp-ctl" focus "$1" >/dev/null 2>&1 || true
+
+# Let the shell pick which panel to show. Opening every bar instance directly
+# would pop a panel on every monitor at once.
+if command -v omarchy-shell >/dev/null 2>&1 && [[ -n $PLUGIN_ID ]]; then
+  omarchy-shell shell summon "$PLUGIN_ID" '{}' >/dev/null 2>&1 || true
+fi

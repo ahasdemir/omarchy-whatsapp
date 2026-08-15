@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# omarchy:summary=Open the full WhatsApp Web client, or focus it if it is already running
+# omarchy:args=[url]
+
+set -euo pipefail
+
+URL="${1:-${OMARCHY_WHATSAPP_WEB_URL:-https://web.whatsapp.com}}"
+PATTERN="${OMARCHY_WHATSAPP_WEB_PATTERN:-web.whatsapp.com}"
+
+# On Omarchy this focuses an existing window instead of spawning a second one.
+if command -v omarchy-launch-or-focus-webapp >/dev/null 2>&1; then
+  exec omarchy-launch-or-focus-webapp "$PATTERN" "$URL"
+fi
+
+if command -v omarchy-launch-webapp >/dev/null 2>&1; then
+  exec omarchy-launch-webapp "$URL"
+fi
+
+# Plain-Chromium fallback for a non-Omarchy session.
+for browser in chromium google-chrome-stable brave microsoft-edge-stable vivaldi-stable; do
+  if command -v "$browser" >/dev/null 2>&1; then
+    exec setsid "$browser" --app="$URL" >/dev/null 2>&1
+  fi
+done
+
+echo "omarchy-whatsapp: no Chromium-family browser found to host the web app" >&2
+exit 1

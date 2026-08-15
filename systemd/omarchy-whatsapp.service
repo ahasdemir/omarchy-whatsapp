@@ -1,0 +1,24 @@
+[Unit]
+Description=WhatsApp bridge for the Omarchy shell
+Documentation=https://github.com/ricky/omarchy-whatsapp
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# @PLUGIN_DIR@ is rewritten by install.sh to the installed plugin directory.
+ExecStart=@PLUGIN_DIR@/bin/omarchy-whatsapp-daemon
+Restart=always
+RestartSec=5
+# The bridge only needs the network, the state dir, and a notification bus.
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+NoNewPrivileges=yes
+MemoryHigh=400M
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=graphical-session.target

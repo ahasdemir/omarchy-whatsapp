@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.ricky.whatsapp",
+  "name": "WhatsApp",
+  "version": "1.0.0",
+  "author": "ricky",
+  "license": "MIT",
+  "description": "WhatsApp for the Omarchy bar: unread badge, desktop notifications, inline reply, and a one-key jump to the full WhatsApp Web client.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "WhatsApp",
+    "category": "Communication",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "socketPath": "",
+      "autostartDaemon": true,
+      "showUnreadCount": true,
+      "hideWhenEmpty": false,
+      "chatLimit": 40,
+      "messageLimit": 60,
+      "webAppUrl": "https://web.whatsapp.com",
+      "webAppPattern": "web.whatsapp.com"
+    },
+    "schema": [
+      { "key": "socketPath", "type": "string", "label": "Daemon socket path (blank = default)" },
+      { "key": "autostartDaemon", "type": "bool", "label": "Start the daemon automatically" },
+      { "key": "showUnreadCount", "type": "bool", "label": "Show unread count next to the icon" },
+      { "key": "hideWhenEmpty", "type": "bool", "label": "Hide the widget when there is nothing unread" },
+      { "key": "chatLimit", "type": "int", "label": "Chats listed in the panel" },
+      { "key": "messageLimit", "type": "int", "label": "Messages loaded per conversation" },
+      { "key": "webAppUrl", "type": "string", "label": "Full client URL" },
+      { "key": "webAppPattern", "type": "string", "label": "Window pattern used to focus the full client" }
+    ]
+  }
+}
