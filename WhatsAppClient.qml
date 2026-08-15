@@ -94,8 +94,15 @@ Item {
     return request(payload)
   }
 
+  property bool setupTried: false
+
   function startDaemon() {
     if (!pluginDir || pluginDir.length === 0) return
+    if (!root.setupTried) {
+      root.setupTried = true
+      setupRunner.running = true
+      return
+    }
     daemonStarter.running = true
   }
 
@@ -281,6 +288,12 @@ Item {
       }
       root.request({ t: "ping" })
     }
+  }
+
+  Process {
+    id: setupRunner
+    command: [root.pluginDir + "/bin/omarchy-whatsapp-setup"]
+    onExited: function () { daemonStarter.running = true }
   }
 
   Process {

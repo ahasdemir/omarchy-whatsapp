@@ -20,7 +20,7 @@ for arg in "$@"; do
   esac
 done
 
-wa_ensure_deps
+wa_ensure_setup
 
 if ((print_qr)); then
   export OMARCHY_WHATSAPP_PRINT_QR=1

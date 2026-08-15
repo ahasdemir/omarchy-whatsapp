@@ -3,7 +3,7 @@
 # (when run from a source checkout), installs the daemon's dependencies, sets up
 # the user service, and enables the bar widget.
 #
-# Safe to re-run: nothing here touches your WhatsApp credentials or chat cache.
+# Safe to re-run. --uninstall also deletes credentials and the chat cache.
 
 set -euo pipefail
 
@@ -31,29 +31,22 @@ Usage: ./install.sh [options]
 
   --no-service   skip the systemd user service (start the daemon yourself)
   --no-enable    skip adding the widget to the bar
-  --uninstall    remove the service, the widget, and the installed plugin
+  --uninstall    stop the service, delete credentials, and remove a copied install
   -h, --help     this message
 
-Chat history and credentials live in ~/.local/state/omarchy-whatsapp and are
-never touched by install or uninstall.
+Credentials live in ~/.local/state/omarchy-whatsapp and are deleted on --uninstall.
 EOF
 }
 
 uninstall() {
-  say "Stopping the service"
-  systemctl --user disable --now "$UNIT_NAME" 2>/dev/null || true
-  rm -f "$UNIT_DIR/$UNIT_NAME"
-  systemctl --user daemon-reload 2>/dev/null || true
+  source "$SOURCE_DIR/bin/_common.sh"
+  say "Stopping the service and deleting local credentials"
+  wa_uninstall
 
   if command -v omarchy >/dev/null 2>&1; then
     say "Removing the bar widget"
     omarchy plugin disable "$PLUGIN_ID" --yes 2>/dev/null || true
   fi
-
-  say "Removing CLI symlinks from $BIN_DIR"
-  for tool in omarchy-whatsapp omarchy-whatsapp-ctl omarchy-whatsapp-focus omarchy-whatsapp-login omarchy-whatsapp-open omarchy-whatsapp-daemon; do
-    [[ -L $BIN_DIR/$tool ]] && rm -f "$BIN_DIR/$tool"
-  done
 
   if [[ -d $PLUGIN_DIR && $PLUGIN_DIR != "$SOURCE_DIR" ]]; then
     say "Removing $PLUGIN_DIR"
@@ -61,7 +54,7 @@ uninstall() {
   fi
 
   command -v omarchy-shell >/dev/null 2>&1 && omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
-  say "Uninstalled. Credentials remain in ~/.local/state/omarchy-whatsapp"
+  say "Uninstalled. The bar entry is gone after: omarchy plugin remove $PLUGIN_ID"
   exit 0
 }
 
@@ -81,7 +74,6 @@ done
 
 [[ -n $PLUGIN_ID ]] || die "could not read the plugin id from manifest.json"
 
-# Resolve a Node runtime the same way the runtime scripts do.
 source "$SOURCE_DIR/bin/_common.sh"
 NODE="$(wa_node)"
 say "Using Node $("$NODE" -v) at $NODE"
@@ -107,59 +99,15 @@ fi
 
 chmod +x "$PLUGIN_DIR"/bin/* "$PLUGIN_DIR"/daemon/ctl.js "$PLUGIN_DIR"/install.sh 2>/dev/null || true
 
-# ── 2. Daemon dependencies ──────────────────────────────────────────────────
-NPM="$(dirname "$NODE")/npm"
-[[ -x $NPM ]] || NPM="$(command -v npm 2>/dev/null || true)"
-[[ -n $NPM && -x $NPM ]] || die "npm not found next to $NODE and not on PATH"
+# After a copy, helpers must resolve the *installed* plugin path.
+source "$PLUGIN_DIR/bin/_common.sh"
 
-say "Installing daemon dependencies"
-(
-  cd "$PLUGIN_DIR/daemon"
-  # --no-bin-links: Omarchy rejects any symlink inside a plugin folder, and
-  # npm's node_modules/.bin shims are symlinks. The daemon is started as
-  # `node index.js`, so no package bin is ever needed.
-  if [[ -f package-lock.json ]]; then
-    PATH="$(dirname "$NODE"):$PATH" "$NPM" ci --omit=dev --no-bin-links --no-audit --no-fund
-  else
-    PATH="$(dirname "$NODE"):$PATH" "$NPM" install --omit=dev --no-bin-links --no-audit --no-fund
-  fi
-)
-
-# Belt and braces: some packages ship symlinks of their own.
-if [[ -d $PLUGIN_DIR/daemon/node_modules ]]; then
-  find "$PLUGIN_DIR/daemon/node_modules" -type l -delete
-fi
-
-# ── 3. CLI on PATH ──────────────────────────────────────────────────────────
-# Symlinks live outside the plugin folder on purpose: Omarchy's plugin
-# validation rejects any symlink inside it.
-say "Linking the CLI into $BIN_DIR"
-mkdir -p "$BIN_DIR"
-for tool in omarchy-whatsapp omarchy-whatsapp-ctl omarchy-whatsapp-focus omarchy-whatsapp-login omarchy-whatsapp-open omarchy-whatsapp-daemon; do
-  ln -sfn "$PLUGIN_DIR/bin/$tool" "$BIN_DIR/$tool"
-done
-case ":$PATH:" in
-*":$BIN_DIR:"*) ;;
-*) echo "    note: $BIN_DIR is not on your PATH; add it to use the omarchy-whatsapp commands" ;;
-esac
-
-# ── 4. User service ─────────────────────────────────────────────────────────
+say "Installing daemon dependencies, CLI, and the user service"
+wa_ensure_setup
 if ((skip_service)); then
-  say "Skipping the systemd user service"
+  say "Skipping the user service start"
 else
-  say "Installing $UNIT_NAME"
-  mkdir -p "$UNIT_DIR"
-  sed -e "s|@PLUGIN_DIR@|$PLUGIN_DIR|g" "$PLUGIN_DIR/systemd/$UNIT_NAME" >"$UNIT_DIR/$UNIT_NAME"
-
-  # Bake the resolved interpreter in: a systemd user unit does not inherit the
-  # PATH additions that version managers install into interactive shells.
-  if ! grep -q '^Environment=OMARCHY_WHATSAPP_NODE=' "$UNIT_DIR/$UNIT_NAME"; then
-    sed -i "/^Environment=NODE_ENV=production/a Environment=OMARCHY_WHATSAPP_NODE=$NODE" "$UNIT_DIR/$UNIT_NAME"
-  fi
-
-  systemctl --user daemon-reload
-  systemctl --user enable "$UNIT_NAME" >/dev/null
-  systemctl --user restart "$UNIT_NAME"
+  systemctl --user restart "$WA_UNIT_NAME"
   say "Service started"
 fi
 

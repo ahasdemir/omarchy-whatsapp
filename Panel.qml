@@ -90,6 +90,12 @@ Panel {
     Qt.callLater(function () { keyCatcher.forceActiveFocus() })
   }
 
+  function logout() {
+    if (root.client) root.client.logout()
+    root.back()
+    root.statusLine = ""
+  }
+
   function moveCursor(delta) {
     if (root.view !== "chats") return
     var count = root.visibleChats.length
@@ -349,6 +355,16 @@ Panel {
                 root.openWebClient()
                 root.close()
               }
+            }
+
+            PanelActionButton {
+              visible: !root.showLogin && root.view === "chats"
+              iconText: "\uf011"
+              tooltipText: "Log out of WhatsApp"
+              foreground: root.barForeground
+              hoverColor: root.bar ? root.bar.urgent : Color.urgent
+              fontFamily: root.fontFamily
+              onClicked: root.logout()
             }
           }
         }

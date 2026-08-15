@@ -17,6 +17,8 @@ Usage: omarchy-whatsapp <command> [args]
   start | stop | restart   control the user service
   logs [-f]                daemon journal
   logout                   unlink this device and wipe local credentials
+  setup                    install deps, the user service, and CLI links
+  uninstall                stop the service and delete credentials
   ctl <...>                raw daemon commands (see omarchy-whatsapp-ctl -h)
 EOF
 }
@@ -32,6 +34,13 @@ status | send | logout | reconnect | read | chats | messages | pair | ping)
   exec "$WA_BIN_DIR/omarchy-whatsapp-ctl" "$command" "$@"
   ;;
 ctl) exec "$WA_BIN_DIR/omarchy-whatsapp-ctl" "$@" ;;
+setup) exec "$WA_BIN_DIR/omarchy-whatsapp-setup" "$@" ;;
+uninstall)
+  wa_uninstall
+  echo "Removed the WhatsApp service, CLI links, and local credentials."
+  echo "The bar widget is still listed until: omarchy plugin remove io.github.ricky.whatsapp"
+  exit 0
+  ;;
 start) exec systemctl --user start omarchy-whatsapp.service ;;
 stop) exec systemctl --user stop omarchy-whatsapp.service ;;
 restart) exec systemctl --user restart omarchy-whatsapp.service ;;

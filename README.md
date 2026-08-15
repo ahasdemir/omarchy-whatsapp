@@ -4,18 +4,10 @@ WhatsApp in the Omarchy Quattro bar: unread badge, desktop notifications you can
 click, inline reply without leaving the bar, and one keystroke to the full
 WhatsApp Web client when you need media, calls, or search.
 
-```
-┌──────────────────────────────┐
-│ WhatsApp        Connected  ⏻ │
-│ ──────────────────────────── │
-│ Aditi             14:32  ②   │
-│ you around?                  │
-│ Family group      13:05      │
-│ Mum: dinner at 8             │
-│ ──────────────────────────── │
-│ Reply…                     ➤ │
-└──────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/inbox.png" alt="Chat list in the Omarchy bar" width="48%" />
+  <img src="docs/chat.png" alt="Conversation with inline reply" width="48%" />
+</p>
 
 ## How it works
 
@@ -39,26 +31,23 @@ the same time.
 ## Install
 
 ```sh
+omarchy plugin add https://github.com/srineshr1/omarchy-whatsapp.git --enable --yes
+```
+
+That is enough. The first time the widget starts it installs Node deps, the
+`omarchy-whatsapp` user service, and CLI links. Click the icon and press Login.
+
+From a source checkout instead:
+
+```sh
 git clone https://github.com/srineshr1/omarchy-whatsapp.git
 cd omarchy-whatsapp
 ./install.sh
 ```
 
-`install.sh` copies the plugin to `~/.config/omarchy/plugins/io.github.ricky.whatsapp/`,
-installs the daemon's dependencies, sets up the `omarchy-whatsapp` user service,
-and adds the widget to your bar.
-
-Via the plugin manager instead (the installer never runs plugin code, so the
-setup step is manual afterwards):
-
-```sh
-omarchy plugin add https://github.com/srineshr1/omarchy-whatsapp.git --enable --yes
-~/.config/omarchy/plugins/io.github.ricky.whatsapp/install.sh
-```
-
 Requirements: Omarchy 4 (Quattro) and Node.js 20+. If Node lives in a version
-manager (mise, proto, fnm, volta, nvm) the installer finds it and pins the
-absolute path into the service unit.
+manager (mise, proto, fnm, volta, nvm) setup finds it and pins the path into
+the service unit.
 
 ## Link your account
 
@@ -95,6 +84,7 @@ systemctl --user edit omarchy-whatsapp     # Environment=OMARCHY_WHATSAPP_PAIRIN
 | Back to the chat list | `Escape` |
 | Close the panel | `Escape` from the list |
 | Full WhatsApp Web | Right-click the icon, or the ⧉ button in the panel |
+| Log out | Power button on the chat list |
 | Open a chat from a notification | Click the notification |
 
 Opening a chat marks it read on every device. Messages arriving while a
@@ -109,10 +99,11 @@ omarchy-whatsapp chats 10                        # recent chats as JSON
 omarchy-whatsapp focus 919812345678@s.whatsapp.net   # open the panel on a chat
 omarchy-whatsapp open                            # full web client
 omarchy-whatsapp restart | logs | logout
+omarchy-whatsapp uninstall                       # service, CLI, credentials
 ```
 
-`install.sh` links these into `~/.local/bin`. `omarchy-whatsapp-ctl -h` lists the
-raw daemon commands.
+The first widget start (or `omarchy-whatsapp setup`) links these into
+`~/.local/bin`. `omarchy-whatsapp-ctl -h` lists the raw daemon commands.
 
 ## Settings
 
@@ -199,9 +190,16 @@ with `omarchy-whatsapp login` if the phone dropped the device.
 ## Remove
 
 ```sh
-./install.sh --uninstall          # or, if installed via the plugin manager:
 omarchy plugin remove io.github.ricky.whatsapp
-rm -rf ~/.local/state/omarchy-whatsapp   # credentials and cache
+```
+
+The next login (or `systemctl --user start omarchy-whatsapp-sweep`) deletes the
+user service, CLI links, credentials, and chat cache. To wipe immediately:
+
+```sh
+omarchy-whatsapp uninstall
+# or, from a source checkout:
+./install.sh --uninstall
 ```
 
 ## License
