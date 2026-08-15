@@ -101,7 +101,8 @@ BarWidget {
     active: root.unread > 0
     dimmed: !root.linked
     tooltipText: {
-      var label = Model.connectionLabel(client.connectionState, client.needsLogin, client.daemonOnline)
+      var label = Model.connectionLabel(client.connectionState, client.needsLogin,
+        client.daemonOnline, client.pairingStopped)
       if (root.unread > 0) return label + " \u00b7 " + root.unread + " unread"
       return "WhatsApp \u00b7 " + label
     }

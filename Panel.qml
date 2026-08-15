@@ -30,6 +30,7 @@ Panel {
   readonly property var chats: client ? client.chats : []
   readonly property bool daemonOnline: client ? client.daemonOnline : false
   readonly property bool needsLogin: client ? client.needsLogin === true : false
+  readonly property bool pairingPaused: client ? client.pairingStopped === true : false
   readonly property bool linked: client ? client.ready : false
   readonly property bool showLogin: !daemonOnline || needsLogin
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
@@ -285,7 +286,7 @@ Panel {
                 }
                 var label = Model.connectionLabel(
                   root.client ? root.client.connectionState : "unknown",
-                  root.needsLogin, root.daemonOnline)
+                  root.needsLogin, root.daemonOnline, root.pairingPaused)
                 var unread = root.client ? root.client.unread : 0
                 return unread > 0 ? label + " \u00b7 " + unread + " unread" : label
               }
@@ -348,7 +349,9 @@ Panel {
             width: parent.width
             text: !root.daemonOnline
               ? "The WhatsApp bridge is not running."
-              : "Link this device to your WhatsApp account."
+              : (root.pairingPaused
+                ? "QR refresh paused after waiting for a scan. The code expires, so it is not left on screen."
+                : "Link this device to your WhatsApp account.")
             color: root.barForeground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -372,17 +375,16 @@ Panel {
           Text {
             width: parent.width
             visible: root.client !== null && root.client.hasQr
-            text: "WhatsApp on your phone \u2192 Settings \u2192 Linked devices \u2192 Link a device, then scan this code."
+            text: "WhatsApp on your phone \u2192 Settings \u2192 Linked devices \u2192 Link a device, then scan this code. The code refreshes every 20 seconds on its own."
             color: root.secondaryForeground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             wrapMode: Text.WordWrap
           }
 
-          Text
-          {
+          Text {
             width: parent.width
-            visible: root.daemonOnline && !(root.client && root.client.hasQr)
+            visible: root.daemonOnline && !root.pairingPaused && !(root.client && root.client.hasQr)
             text: "Waiting for a pairing code from WhatsApp\u2026"
             color: root.secondaryForeground
             font.family: root.fontFamily
@@ -395,13 +397,19 @@ Panel {
             spacing: Style.space(6)
 
             Button {
-              text: root.daemonOnline ? "Link in terminal" : "Start bridge"
+              text: {
+                if (!root.daemonOnline) return "Start bridge"
+                return root.pairingPaused ? "Show QR code" : "Link in terminal"
+              }
               foreground: root.barForeground
               fontFamily: root.fontFamily
               bordered: true
               onClicked: {
-                if (root.daemonOnline) loginLauncher.running = true
-                else daemonStarter.running = true
+                if (!root.daemonOnline) daemonStarter.running = true
+                else if (root.pairingPaused) {
+                  root.statusLine = "Requesting a fresh QR code\u2026"
+                  if (root.client) root.client.reconnectWhatsApp()
+                } else loginLauncher.running = true
               }
             }
 

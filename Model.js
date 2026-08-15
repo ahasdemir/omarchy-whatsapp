@@ -102,14 +102,16 @@ function statusIsRead(status) {
   return (status | 0) >= 4
 }
 
-function connectionLabel(state, needsLogin, daemonOnline) {
+function connectionLabel(state, needsLogin, daemonOnline, pairingStopped) {
   if (!daemonOnline) return "Daemon offline"
+  if (pairingStopped) return "QR paused"
   if (needsLogin) return "Not linked"
   switch (state) {
     case "open": return "Connected"
     case "connecting": return "Connecting\u2026"
     case "qr": return "Waiting for scan"
     case "close": return "Reconnecting\u2026"
+    case "idle": return "Idle"
     default: return state ? String(state) : "Unknown"
   }
 }

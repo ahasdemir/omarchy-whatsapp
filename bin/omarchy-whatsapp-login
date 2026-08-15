@@ -70,6 +70,14 @@ if [[ $(status_field connection) == "open" ]]; then
   exit 0
 fi
 
+# The daemon pauses QR refresh after five minutes with no scan. Reopen the
+# pairing window so a fresh, scannable code is on the way.
+if [[ $(status_field pairingStopped) == "true" ]]; then
+  echo "Pairing was paused; requesting a fresh QR code..."
+  "${CTL[@]}" reconnect >/dev/null 2>&1 || true
+  sleep 2
+fi
+
 if [[ -n $pair_phone ]]; then
   echo "Requesting a pairing code for +$pair_phone ..."
   # WhatsApp only issues a pairing code once the socket has reached the

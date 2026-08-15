@@ -27,6 +27,9 @@ Item {
   property string connectionState: "unknown"
   property bool needsLogin: false
   property bool hasQr: false
+  // The daemon pauses QR refresh after its pairing window closes rather than
+  // leave an expired code on screen.
+  property bool pairingStopped: false
   property int qrVersion: 0
   property string qrPng: ""
   property int unread: 0
@@ -142,6 +145,7 @@ Item {
         root.connectionState = frame.connection || "unknown"
         root.needsLogin = frame.needsLogin === true
         root.hasQr = frame.hasQr === true
+        root.pairingStopped = frame.pairingStopped === true
         // Path before version: anything reacting to the version bump must
         // already see the matching file.
         root.qrPng = frame.qrPng || ""

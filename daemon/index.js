@@ -19,6 +19,21 @@ import { isGroupJid, isIgnorableChat, isSilent, messageText, messageType, pretty
 
 const RECONNECT_BASE_MS = 2000
 const RECONNECT_MAX_MS = 60000
+// WhatsApp hands out a batch of ~6 QR refs and then closes the socket with 408.
+// That is the normal rhythm of pairing, not a failure, so the next batch is one
+// quick reconnect away rather than an exponential backoff.
+const PAIRING_RETRY_MS = 1500
+// 515 means "handshake done, reconnect now" and arrives right after a successful
+// scan. Waiting here would stall the login the user just completed.
+const RESTART_RETRY_MS = 250
+// Pairing does not run forever. Without this the daemon regenerates a QR every
+// 20s for as long as it is enabled, hammering WhatsApp's pairing endpoint for an
+// account that may never be linked.
+const PAIRING_WINDOW_MS = Math.max(
+  15000,
+  Number(process.env.OMARCHY_WHATSAPP_PAIRING_WINDOW_MS) || 5 * 60 * 1000
+)
+const MAX_QR_PER_PAIRING = 32
 const PRINT_QR = process.env.OMARCHY_WHATSAPP_PRINT_QR === '1'
 
 // Messages predating this run are backlog, not news: they were already
@@ -35,6 +50,12 @@ let connection = 'connecting'
 let qrVersion = 0
 let hasQr = false
 let currentQrPng = ''
+// Pairing window bookkeeping, plus the live creds so a 401 can be told apart
+// from "this pairing attempt was rejected".
+let pairingStartedAt = 0
+let qrCount = 0
+let pairingStopped = false
+let creds = null
 let needsLogin = false
 let lastError = ''
 let reconnectAttempts = 0
@@ -62,6 +83,8 @@ function state() {
     hasQr,
     qrVersion,
     qrPng: hasQr ? currentQrPng : '',
+    pairingStopped,
+    linked: !!creds?.registered,
     me: store.me,
     unread: store.totalUnread(),
     lastError,
@@ -185,7 +208,42 @@ function applyContacts(contacts) {
   }
 }
 
+// Open a pairing window. Every QR the daemon shows is counted against it, so an
+// unlinked account cannot keep the pairing endpoint busy indefinitely.
+function startPairing(reason) {
+  pairingStopped = false
+  pairingStartedAt = Date.now()
+  qrCount = 0
+  logger.info({ reason }, 'pairing: window open')
+}
+
+// Stop refreshing and drop the QR rather than leave an expired code on screen
+// pretending to be scannable. The panel's "Show QR code" button and
+// `omarchy-whatsapp login` both reopen the window.
+function stopPairing() {
+  pairingStopped = true
+  clearQr()
+  connection = 'idle'
+  needsLogin = true
+  logger.info({ qrCount }, 'pairing: no scan within the window, pausing QR refresh')
+  pushState()
+  try {
+    sock?.end(new Error('pairing paused'))
+  } catch {
+    // Already closed.
+  }
+}
+
 async function writeQr(qr) {
+  if (pairingStopped) return
+  if (pairingStartedAt === 0) startPairing('first qr')
+
+  qrCount += 1
+  if (qrCount > MAX_QR_PER_PAIRING || Date.now() - pairingStartedAt > PAIRING_WINDOW_MS) {
+    stopPairing()
+    return
+  }
+
   const version = qrVersion + 1
   const target = qrPngFileFor(version)
   try {
@@ -226,11 +284,17 @@ function clearQr() {
   removeFile(qrTxtFile)
 }
 
-function scheduleReconnect() {
-  if (stopping || reconnectTimer) return
-  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(reconnectAttempts, 5))
-  reconnectAttempts += 1
-  logger.info({ delay }, 'connection: reconnecting')
+// `delayOverride` covers the disconnects that are part of normal operation
+// (QR batch ended, post-pair restart). Those must not consume the backoff
+// budget reserved for genuine network trouble.
+function scheduleReconnect(delayOverride, options) {
+  if (stopping || pairingStopped || reconnectTimer) return
+  const countsAsFailure = !options || options.countsAsFailure !== false
+  const delay = delayOverride !== undefined
+    ? delayOverride
+    : Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** Math.min(reconnectAttempts, 5))
+  if (countsAsFailure) reconnectAttempts += 1
+  logger.info({ delay, reason: options?.reason || 'failure' }, 'connection: reconnecting')
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null
     connect().catch((err) => {
@@ -250,6 +314,7 @@ async function connect() {
 
   try {
     const { state: authState, saveCreds } = await useMultiFileAuthState(authDir)
+    creds = authState.creds
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }))
 
     sock = makeWASocket({
@@ -278,6 +343,9 @@ async function connect() {
       if (next === 'open') {
         connection = 'open'
         needsLogin = false
+        pairingStopped = false
+        pairingStartedAt = 0
+        qrCount = 0
         reconnectAttempts = 0
         lastError = ''
         clearQr()
@@ -299,13 +367,48 @@ async function connect() {
         connecting = false
 
         if (statusCode === DisconnectReason.loggedOut) {
-          // The phone unlinked this device. Reconnecting with dead creds loops
-          // forever, so drop them and wait for a fresh pairing.
-          logger.warn('connection: logged out, clearing credentials')
-          wipeAuth()
-          needsLogin = true
+          // 401 means two very different things. If this device was actually
+          // paired, the phone unlinked it and the credentials are dead. If it
+          // was never paired, the server merely rejected this pairing attempt —
+          // wiping there would throw away the chat cache for nothing.
+          if (creds?.registered) {
+            logger.warn('connection: device unlinked from the phone, clearing credentials')
+            wipeAuth()
+            needsLogin = true
+            startPairing('device unlinked')
+            pushState()
+            connect().catch((err) => logger.error({ err }, 'connection: relogin failed'))
+          } else {
+            logger.warn('connection: pairing attempt rejected, retrying')
+            needsLogin = true
+            pushState()
+            scheduleReconnect(PAIRING_RETRY_MS, { reason: 'pairing rejected', countsAsFailure: false })
+          }
+          return
+        }
+
+        if (pairingStopped) {
+          // Stay 'idle' rather than 'close': nothing is retrying, so reporting a
+          // closed connection would read as a fault instead of a paused pairing.
+          connection = 'idle'
           pushState()
-          connect().catch((err) => logger.error({ err }, 'connection: relogin failed'))
+          return
+        }
+
+        // Both of these are routine, not faults.
+        if (statusCode === DisconnectReason.restartRequired) {
+          logger.info('connection: restart required, reconnecting immediately')
+          pushState()
+          scheduleReconnect(RESTART_RETRY_MS, { reason: 'restart required', countsAsFailure: false })
+          return
+        }
+
+        if (needsLogin && statusCode === DisconnectReason.timedOut) {
+          // Baileys uses 408 for both "QR refs ended" and "connection lost";
+          // while unlinked and mid-pairing it is always the former.
+          logger.info('connection: QR batch ended, requesting a fresh one')
+          pushState()
+          scheduleReconnect(PAIRING_RETRY_MS, { reason: 'qr batch ended', countsAsFailure: false })
           return
         }
 
@@ -548,6 +651,7 @@ async function handleCommand(payload, reply) {
 
     case 'reconnect':
       reconnectAttempts = 0
+      startPairing('manual reconnect')
       try {
         sock?.end(new Error('manual reconnect'))
       } catch {
@@ -566,6 +670,7 @@ async function handleCommand(payload, reply) {
       }
       wipeAuth()
       needsLogin = true
+      startPairing('logout')
       connection = 'close'
       pushState()
       pushChats()
@@ -622,6 +727,18 @@ async function main() {
     }
     throw err
   }
+
+  startPairing('daemon start')
+
+  // The window is otherwise only tested when the next QR arrives, and WhatsApp's
+  // first ref lives for a minute, so the pause would land late.
+  const pairingWatchdog = setInterval(() => {
+    if (stopping || pairingStopped) return
+    if (!needsLogin || connection === 'open') return
+    if (pairingStartedAt === 0) return
+    if (Date.now() - pairingStartedAt > PAIRING_WINDOW_MS) stopPairing()
+  }, 5000)
+  pairingWatchdog.unref?.()
 
   for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => shutdown(signal))
   process.on('uncaughtException', (err) => logger.error({ err }, 'uncaught exception'))

@@ -71,6 +71,19 @@ omarchy-whatsapp login --pair 919812345678   # 8-digit code instead
 
 On your phone: **Settings → Linked devices → Link a device**.
 
+The code refreshes itself every ~20 seconds (WhatsApp expires each one), so the
+panel always shows a live code — no need to reopen anything.
+
+After five minutes without a scan the daemon **pauses** and removes the code
+rather than leave an expired one on screen looking scannable. The panel then
+offers **Show QR code**, and `omarchy-whatsapp login` reopens the window too.
+That cap also keeps an unlinked install from polling WhatsApp's pairing endpoint
+forever. To change it:
+
+```sh
+systemctl --user edit omarchy-whatsapp     # Environment=OMARCHY_WHATSAPP_PAIRING_WINDOW_MS=600000
+```
+
 ## Use it
 
 | Action | How |
