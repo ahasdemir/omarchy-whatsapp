@@ -127,3 +127,112 @@ function connectionLabel(state, needsLogin, daemonOnline, pairingStopped) {
 function isReady(state, needsLogin, daemonOnline) {
   return needsLogin !== true && (state === "open" || daemonOnline === true)
 }
+
+function escapeHtml(str) {
+  if (!str) return ""
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+}
+
+var WEB_TLDS = {
+  "com": true, "net": true, "org": true, "app": true, "io": true, "dev": true, "ai": true, "co": true,
+  "tr": true, "xyz": true, "me": true, "tv": true, "info": true, "store": true, "shop": true, "online": true,
+  "site": true, "tech": true, "link": true, "live": true, "page": true, "space": true, "top": true, "club": true,
+  "digital": true, "edu": true, "gov": true, "mil": true, "cc": true, "to": true, "is": true, "so": true,
+  "st": true, "ly": true, "de": true, "fr": true, "uk": true, "us": true, "ca": true, "eu": true, "ch": true,
+  "nl": true, "ru": true, "it": true, "es": true, "se": true, "no": true, "fi": true, "dk": true, "cz": true,
+  "pl": true, "at": true, "be": true, "gr": true, "hu": true, "ro": true, "bg": true, "rs": true, "hr": true,
+  "si": true, "sk": true, "ua": true, "by": true, "kz": true, "uz": true, "lt": true, "lv": true, "ee": true,
+  "mx": true, "ar": true, "cl": true, "pe": true, "ve": true, "za": true, "eg": true, "sa": true, "ae": true,
+  "il": true, "qa": true, "kw": true, "bh": true, "om": true, "jo": true, "lb": true, "ma": true, "dz": true,
+  "tn": true, "ng": true, "ke": true, "gh": true, "tz": true, "ug": true, "et": true, "pk": true, "bd": true,
+  "lk": true, "np": true, "mm": true, "th": true, "ph": true, "my": true, "sg": true, "id": true, "vn": true,
+  "kr": true, "jp": true, "cn": true, "tw": true, "hk": true, "au": true, "nz": true
+}
+
+function isWebUrl(urlStr) {
+  if (/^https?:\/\//i.test(urlStr) || /^www\./i.test(urlStr) || /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(urlStr)) {
+    return true
+  }
+  if (urlStr.indexOf("/") !== -1 || urlStr.indexOf(":") !== -1) return true
+  var parts = urlStr.toLowerCase().split(".")
+  if (parts.length < 2) return false
+  var tld = parts[parts.length - 1]
+  if (WEB_TLDS[tld]) return true
+  return parts.length >= 3 && /^[a-z]{2,63}$/.test(tld)
+}
+
+function formatMessageText(text, linkColor) {
+  if (!text) return ""
+  var raw = String(text)
+  var color = linkColor || "#4fc3f7"
+
+  // WhatsApp document attachments start with \uf15c icon. Protect document filename header.
+  var docPrefix = ""
+  var bodyToFormat = raw
+  if (/^\uf15c\s*/.test(raw)) {
+    var firstLineEnd = raw.indexOf("\n")
+    if (firstLineEnd === -1) {
+      return escapeHtml(raw)
+    } else {
+      docPrefix = escapeHtml(raw.slice(0, firstLineEnd)) + "<br/>"
+      bodyToFormat = raw.slice(firstLineEnd + 1)
+    }
+  }
+
+  var urlRegex = /(https?:\/\/[^\s<]+|www\.[^\s<]+|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}|(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,63}(?::\d+)?(?:\/[^\s<]*)?)/gi
+  var result = ""
+  var lastIndex = 0
+  var match
+
+  while ((match = urlRegex.exec(bodyToFormat)) !== null) {
+    var url = match[0]
+    var matchIndex = match.index
+
+    // Check unicode word boundary before match
+    if (matchIndex > 0 && /[\p{L}\p{N}_@-]/u.test(bodyToFormat[matchIndex - 1]) && !/^https?:\/\//i.test(url)) {
+      continue
+    }
+
+    if (!isWebUrl(url)) continue
+
+    if (matchIndex > lastIndex) {
+      result += escapeHtml(bodyToFormat.slice(lastIndex, matchIndex)).replace(/\n/g, "<br/>")
+    }
+
+    var cleanUrl = url
+    var trailing = ""
+    var puncMatch = /[.,;!?)]+$/.exec(url)
+    if (puncMatch) {
+      trailing = puncMatch[0]
+      cleanUrl = url.slice(0, url.length - trailing.length)
+    }
+
+    var href = cleanUrl
+    if (/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(cleanUrl)) {
+      href = "mailto:" + cleanUrl
+    } else if (!/^https?:\/\//i.test(cleanUrl)) {
+      href = "https://" + cleanUrl
+    }
+
+    result += '<a href="' + escapeHtml(href) + '"><font color="' + color + '"><u>' + escapeHtml(cleanUrl) + '</u></font></a>'
+    if (trailing) {
+      result += escapeHtml(trailing).replace(/\n/g, "<br/>")
+    }
+
+    lastIndex = matchIndex + url.length
+  }
+
+  if (lastIndex < bodyToFormat.length) {
+    result += escapeHtml(bodyToFormat.slice(lastIndex)).replace(/\n/g, "<br/>")
+  }
+
+  return docPrefix + result
+}
+
+
+
