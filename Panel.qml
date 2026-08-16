@@ -20,7 +20,7 @@ Panel {
   property var client: null
   property string pluginDir: ""
 
-  // "chats" | "chat"; the login screen replaces both while unlinked.
+  // "chats" | "chat" | "compose"; the login screen replaces all while unlinked.
   property string view: "chats"
   property string activeJid: ""
   property var activeChat: null
@@ -31,6 +31,15 @@ Panel {
   property bool logoutConfirmOpen: false
   property string peekImagePath: ""
   readonly property bool peekActive: peekImagePath.length > 0
+  property bool unreadOnly: false
+  // Chats marked read while the panel is open stay in the unread-only list
+  // until the window hides, so the row does not vanish under the cursor.
+  property var heldReadJids: ({})
+  property string composeJid: ""
+  property bool composePicking: false
+  property bool searchOpen: false
+  property string searchQuery: ""
+  readonly property int searchLimit: 200
 
   readonly property var chats: client ? client.chats : []
   readonly property bool daemonOnline: client ? client.daemonOnline : false
@@ -43,6 +52,62 @@ Panel {
   readonly property color secondaryForeground: Qt.darker(root.barForeground, 1.5)
   readonly property int chatLimit: root.setting("chatLimit", 40)
   readonly property int messageLimit: root.setting("messageLimit", 60)
+
+  readonly property var favorites: {
+    var raw = root.setting("favorites", [])
+    if (typeof raw === "string") {
+      try { raw = JSON.parse(raw) } catch (e) { raw = [] }
+    }
+    if (!raw || !raw.length) return []
+    var names = {}
+    var chats = root.chats || []
+    for (var c = 0; c < chats.length; c++) {
+      if (chats[c] && chats[c].jid) names[chats[c].jid] = Model.chatTitle(chats[c])
+    }
+    var out = []
+    for (var i = 0; i < raw.length; i++) {
+      var item = raw[i]
+      var jid = typeof item === "string" ? item : (item && item.jid ? item.jid : "")
+      if (!jid) continue
+      var stored = (item && item.name) ? item.name : ""
+      out.push({ jid: jid, name: names[jid] || stored || Model.prettyJid(jid) })
+    }
+    return out
+  }
+
+  readonly property var pickerChats: {
+    var list = root.chats || []
+    var query = (root.searchQuery || "").trim()
+    var out = []
+    for (var i = 0; i < list.length; i++) {
+      var chat = list[i]
+      if (!chat || root.isFavorite(chat.jid)) continue
+      if (query && !Model.chatMatches(chat, query)) continue
+      out.push(chat)
+    }
+    return out
+  }
+
+  readonly property var visibleFavorites: {
+    var list = root.favorites
+    var query = (root.searchQuery || "").trim()
+    if (!query) return list
+    var out = []
+    for (var i = 0; i < list.length; i++) {
+      if (Model.chatMatches(list[i], query)) out.push(list[i])
+    }
+    return out
+  }
+
+  readonly property var composeTarget: {
+    var jid = root.composeJid
+    if (!jid) return null
+    var list = root.favorites
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].jid === jid) return list[i]
+    }
+    return { jid: jid, name: Model.prettyJid(jid) }
+  }
 
   function open() { root.controller.show() }
   function close() { root.controller.hide() }
@@ -61,7 +126,162 @@ Panel {
 
   readonly property var visibleChats: {
     var list = root.chats || []
-    return list.slice(0, Math.max(1, root.chatLimit))
+    var held = root.heldReadJids || {}
+    var filter = root.unreadOnly
+    var query = (root.searchQuery || "").trim()
+    var out = []
+    var limit = query ? Math.max(root.chatLimit, root.searchLimit) : Math.max(1, root.chatLimit)
+    for (var i = 0; i < list.length; i++) {
+      var chat = list[i]
+      if (!chat) continue
+      var unread = (chat.unread || 0) > 0
+      if (filter && !unread && !held[chat.jid]) continue
+      if (query && !Model.chatMatches(chat, query)) continue
+      out.push(chat)
+      if (out.length >= limit) break
+    }
+    return out
+  }
+
+  function holdChat(jid) {
+    if (!jid) return
+    var next = Object.assign({}, root.heldReadJids)
+    next[jid] = true
+    root.heldReadJids = next
+  }
+
+  function markChatRead(jid) {
+    if (!jid || !root.client) return
+    if (root.opened) root.holdChat(jid)
+    root.client.markRead(jid)
+  }
+
+  function toggleUnreadOnly() {
+    root.unreadOnly = !root.unreadOnly
+    var count = root.visibleChats.length
+    if (root.cursorIndex >= count) root.cursorIndex = Math.max(0, count - 1)
+  }
+
+  function requestedChatLimit() {
+    return root.searchOpen || (root.searchQuery || "").trim().length > 0
+      ? Math.max(root.chatLimit, root.searchLimit)
+      : root.chatLimit
+  }
+
+  function openSearch() {
+    if (root.view === "chat") {
+      root.view = "chats"
+      root.activeJid = ""
+      root.activeChat = null
+      root.messages = []
+      composer.text = ""
+    }
+    root.searchOpen = true
+    if (root.client) root.client.requestChats(root.requestedChatLimit())
+    Qt.callLater(function () { searchField.forceActiveFocus() })
+  }
+
+  function closeSearch() {
+    root.searchOpen = false
+    root.searchQuery = ""
+    root.cursorIndex = 0
+    if (root.client) root.client.requestChats(root.chatLimit)
+    Qt.callLater(function () { keyCatcher.forceActiveFocus() })
+  }
+
+  function toggleSearch() {
+    if (root.searchOpen) root.closeSearch()
+    else root.openSearch()
+  }
+
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
+    for (var key in values) entry[key] = values[key]
+    root.settings = entry
+    if (root.hostWidget && "settings" in root.hostWidget) root.hostWidget.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function isFavorite(jid) {
+    if (!jid) return false
+    var list = root.favorites
+    for (var i = 0; i < list.length; i++) if (list[i].jid === jid) return true
+    return false
+  }
+
+  function persistFavorites(list) {
+    var stored = []
+    for (var i = 0; i < list.length; i++) {
+      if (!list[i] || !list[i].jid) continue
+      stored.push({ jid: list[i].jid, name: list[i].name || "" })
+    }
+    root.persistSettings({ favorites: stored })
+  }
+
+  function toggleFavorite(chat) {
+    if (!chat || !chat.jid) return
+    var list = root.favorites.slice()
+    var idx = -1
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].jid === chat.jid) { idx = i; break }
+    }
+    if (idx >= 0) {
+      list.splice(idx, 1)
+      if (root.composeJid === chat.jid) root.composeJid = ""
+    } else {
+      list.push({ jid: chat.jid, name: Model.chatTitle(chat) })
+    }
+    root.persistFavorites(list)
+  }
+
+  function addFavorite(chat) {
+    if (!chat || !chat.jid || root.isFavorite(chat.jid)) return
+    var list = root.favorites.slice()
+    list.push({ jid: chat.jid, name: Model.chatTitle(chat) })
+    root.persistFavorites(list)
+    root.composeJid = chat.jid
+    root.composePicking = false
+    root.cursorIndex = Math.max(0, list.length - 1)
+    Qt.callLater(function () { quickComposer.forceActiveFocus() })
+  }
+
+  function openCompose() {
+    root.view = "compose"
+    root.composePicking = root.favorites.length === 0
+    root.cursorIndex = 0
+    root.statusLine = ""
+    if (!root.composeJid && root.favorites.length === 1)
+      root.composeJid = root.favorites[0].jid
+    if (root.composeJid) {
+      var list = root.favorites
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].jid === root.composeJid) { root.cursorIndex = i; break }
+      }
+    }
+    Qt.callLater(function () {
+      if (!root.composePicking && root.favorites.length > 0) quickComposer.forceActiveFocus()
+      else keyCatcher.forceActiveFocus()
+    })
+  }
+
+  function sendQuickMessage() {
+    var text = quickComposer.text
+    if (!text || !text.trim().length) return
+    if (!root.composeJid) {
+      root.statusLine = "Pick a favorite first"
+      return
+    }
+    if (!root.client || !root.client.ready) {
+      root.statusLine = "Not connected to WhatsApp"
+      return
+    }
+    if (root.client.sendMessage(root.composeJid, text)) {
+      quickComposer.text = ""
+      var target = root.composeTarget
+      root.statusLine = "Sent to " + (target ? target.name : Model.prettyJid(root.composeJid))
+    }
   }
 
   // Point the panel at a chat without touching read state. Used by the focus
@@ -80,17 +300,24 @@ Panel {
   // User-initiated open: marks the chat read and puts the cursor in the reply box.
   function selectChat(jid) {
     root.prepareChat(jid)
-    if (!root.client) return
-    root.client.markRead(jid)
+    root.markChatRead(jid)
     Qt.callLater(function () { composer.forceActiveFocus() })
   }
 
   function back() {
+    if (root.view === "compose" && root.composePicking && root.favorites.length > 0) {
+      root.composePicking = false
+      root.cursorIndex = 0
+      Qt.callLater(function () { quickComposer.forceActiveFocus() })
+      return
+    }
     root.view = "chats"
     root.activeJid = ""
     root.activeChat = null
     root.messages = []
+    root.composePicking = false
     composer.text = ""
+    quickComposer.text = ""
     Qt.callLater(function () { keyCatcher.forceActiveFocus() })
   }
 
@@ -113,20 +340,46 @@ Panel {
   }
 
   function moveCursor(delta) {
-    if (root.view !== "chats") return
-    var count = root.visibleChats.length
+    var list = null
+    var view = null
+    if (root.view === "chats") {
+      list = root.visibleChats
+      view = chatList
+    } else if (root.view === "compose" && root.composePicking) {
+      list = root.pickerChats
+      view = favoritePicker
+    } else if (root.view === "compose") {
+      list = root.visibleFavorites
+      view = favoriteList
+    } else {
+      return
+    }
+    var count = list.length
     if (count === 0) return
     var next = root.cursorIndex + delta
     if (next < 0) next = 0
     if (next > count - 1) next = count - 1
     root.cursorIndex = next
-    chatList.positionViewAtIndex(next, ListView.Contain)
+    if (view) view.positionViewAtIndex(next, ListView.Contain)
   }
 
   function activateCursor() {
-    if (root.view !== "chats") return
-    var chat = root.chatAt(root.cursorIndex)
-    if (chat) root.selectChat(chat.jid)
+    if (root.view === "chats") {
+      var chat = root.chatAt(root.cursorIndex)
+      if (chat) root.selectChat(chat.jid)
+      return
+    }
+    if (root.view !== "compose") return
+    if (root.composePicking) {
+      var pick = root.pickerChats[root.cursorIndex]
+      if (pick) root.addFavorite(pick)
+      return
+    }
+    var fav = root.visibleFavorites[root.cursorIndex]
+    if (fav) {
+      root.composeJid = fav.jid
+      Qt.callLater(function () { quickComposer.forceActiveFocus() })
+    }
   }
 
   function sendReply() {
@@ -185,14 +438,19 @@ Panel {
   }
 
   onOpenedChanged: {
-    if (!root.opened) return
+    if (!root.opened) {
+      root.heldReadJids = ({})
+      root.searchOpen = false
+      root.searchQuery = ""
+      return
+    }
     root.statusLine = ""
     if (root.client) {
       root.client.refresh()
-      root.client.requestChats(root.chatLimit)
+      root.client.requestChats(root.requestedChatLimit())
       if (root.view === "chat" && root.activeJid) {
         root.client.loadMessages(root.activeJid, root.messageLimit)
-        root.client.markRead(root.activeJid)
+        root.markChatRead(root.activeJid)
         Qt.callLater(function () { composer.forceActiveFocus() })
       }
     }
@@ -216,7 +474,7 @@ Panel {
       root.appendMessage(message)
       // The conversation is on screen, so the message is read the moment it
       // lands rather than sitting as an unread the user has already seen.
-      if (root.opened && root.client && root.client.ready) root.client.markRead(jid)
+      if (root.opened && root.client && root.client.ready) root.markChatRead(jid)
     }
 
     function onMessageStatusChanged(jid, messageId, status) {
@@ -279,18 +537,23 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      // Composer, logout confirm, and image peek own keys while they are up.
-      blocked: composer.activeFocus || root.logoutConfirmOpen || root.peekActive
+      // Composer, logout confirm, search, and image peek own keys while they are up.
+      blocked: composer.activeFocus || quickComposer.activeFocus || searchField.activeFocus || root.logoutConfirmOpen || root.peekActive
 
       onCloseRequested: {
         if (root.peekActive) root.peekImagePath = ""
         else if (root.logoutConfirmOpen) root.cancelLogout()
-        else if (root.view === "chat") root.back()
+        else if (root.searchOpen) root.closeSearch()
+        else if (root.view === "chat" || root.view === "compose") root.back()
         else root.close()
       }
       onTabRequested: function (direction) { root.switchPanel(direction) }
       onMoveRequested: function (dx, dy) { root.moveCursor(dy) }
       onActivateRequested: root.activateCursor()
+      onTextKey: function (t) {
+        if ((t === "/" || t === "?") && !root.showLogin && root.view !== "chat")
+          root.openSearch()
+      }
 
       Column {
         id: content
@@ -304,7 +567,7 @@ Panel {
 
           Rectangle {
             id: backButton
-            visible: root.view === "chat"
+            visible: root.view === "chat" || root.view === "compose"
             width: Style.space(26)
             height: Style.space(26)
             anchors.left: parent.left
@@ -344,9 +607,13 @@ Panel {
 
             Text {
               width: parent.width
-              text: root.view === "chat"
-                ? Model.chatTitle(root.activeChat || { jid: root.activeJid, name: "" })
-                : "WhatsApp"
+              text: {
+                if (root.view === "chat")
+                  return Model.chatTitle(root.activeChat || { jid: root.activeJid, name: "" })
+                if (root.view === "compose")
+                  return root.composePicking ? "Add favorite" : "New message"
+                return "WhatsApp"
+              }
               color: root.barForeground
               font.family: root.fontFamily
               font.pixelSize: Style.font.subtitle
@@ -359,6 +626,11 @@ Panel {
               text: {
                 if (root.statusLine.length > 0) return root.statusLine
                 if (root.view === "chat") return ""
+                if (root.view === "compose") {
+                  if (root.composePicking) return "Star a conversation to add it"
+                  if (root.composeTarget) return "To " + root.composeTarget.name
+                  return root.favorites.length > 0 ? "Pick a favorite" : "Star someone to get started"
+                }
                 if (root.needsLogin) return root.hasQr ? "Scan the QR code" : ""
                 var unread = root.client ? root.client.unread : 0
                 return unread > 0 ? unread + " unread" : ""
@@ -378,6 +650,25 @@ Panel {
             spacing: Style.space(2)
 
             PanelActionButton {
+              visible: !root.showLogin && root.view !== "chat"
+              iconText: "\uf002"
+              tooltipText: root.searchOpen ? "Close search" : "Find contacts"
+              foreground: root.barForeground
+              hasCursor: root.searchOpen
+              fontFamily: root.fontFamily
+              onClicked: root.toggleSearch()
+            }
+
+            PanelActionButton {
+              visible: !root.showLogin && root.view !== "compose"
+              iconText: "\uf040"
+              tooltipText: "New message to a favorite"
+              foreground: root.barForeground
+              fontFamily: root.fontFamily
+              onClicked: root.openCompose()
+            }
+
+            PanelActionButton {
               iconText: "\uf24d"
               tooltipText: "Open the full WhatsApp Web client"
               foreground: root.barForeground
@@ -386,6 +677,21 @@ Panel {
                 root.openWebClient()
                 root.close()
               }
+            }
+
+            Button {
+              visible: !root.showLogin && root.view === "chats"
+              text: "Unread"
+              selected: root.unreadOnly
+              bordered: true
+              tooltipText: root.unreadOnly ? "Showing unread only" : "Show unread only"
+              foreground: root.barForeground
+              accent: root.bar ? root.bar.urgent : Color.accent
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(8)
+              verticalPadding: Style.space(3)
+              onClicked: root.toggleUnreadOnly()
             }
 
             PanelActionButton {
@@ -401,6 +707,38 @@ Panel {
         }
 
         PanelSeparator { foreground: root.barForeground }
+
+        TextField {
+          id: searchField
+          width: parent.width
+          visible: root.searchOpen && !root.showLogin && root.view !== "chat"
+          foreground: root.barForeground
+          accent: root.bar ? root.bar.urgent : Color.accent
+          placeholderText: root.view === "compose" ? "Find a contact\u2026" : "Find chats and contacts\u2026"
+          text: root.searchQuery
+          onTextChanged: {
+            if (root.searchQuery === text) return
+            root.searchQuery = text
+            root.cursorIndex = 0
+          }
+          Keys.onEscapePressed: function (event) {
+            if (searchField.text.length > 0) searchField.text = ""
+            else root.closeSearch()
+            event.accepted = true
+          }
+          Keys.onDownPressed: function (event) {
+            root.moveCursor(1)
+            event.accepted = true
+          }
+          Keys.onUpPressed: function (event) {
+            root.moveCursor(-1)
+            event.accepted = true
+          }
+          Keys.onReturnPressed: function (event) {
+            root.activateCursor()
+            event.accepted = true
+          }
+        }
 
         // ── Login ────────────────────────────────────────────────────────
         Column {
@@ -464,7 +802,11 @@ Panel {
           Text {
             width: parent.width
             visible: root.visibleChats.length === 0
-            text: "No conversations yet."
+            text: {
+              if ((root.searchQuery || "").trim().length > 0) return "No matches."
+              if (root.unreadOnly) return "No unread conversations."
+              return "No conversations yet."
+            }
             color: root.secondaryForeground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -499,7 +841,7 @@ Panel {
               Column {
                 id: rowText
                 anchors.left: parent.left
-                anchors.right: rowMeta.left
+                anchors.right: (starBtn.visible ? starBtn.left : (markReadBtn.visible ? markReadBtn.left : rowMeta.left))
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.leftMargin: Style.space(8)
                 anchors.rightMargin: Style.space(6)
@@ -572,6 +914,241 @@ Panel {
                 onContainsMouseChanged: if (containsMouse) root.cursorIndex = chatRow.index
                 onClicked: root.selectChat(chatRow.modelData.jid)
               }
+
+              // After the row MouseArea so the click lands here, not on the chat.
+              PanelActionButton {
+                id: starBtn
+                z: 2
+                anchors.right: markReadBtn.visible ? markReadBtn.left : rowMeta.left
+                anchors.rightMargin: Style.space(2)
+                anchors.verticalCenter: parent.verticalCenter
+                visible: chatRow.hasCursor || root.isFavorite(chatRow.modelData.jid)
+                iconText: root.isFavorite(chatRow.modelData.jid) ? "\uf005" : "\uf006"
+                tooltipText: root.isFavorite(chatRow.modelData.jid) ? "Remove from favorites" : "Add to favorites"
+                foreground: root.barForeground
+                fontFamily: root.fontFamily
+                size: Style.space(22)
+                onClicked: root.toggleFavorite(chatRow.modelData)
+              }
+
+              PanelActionButton {
+                id: markReadBtn
+                z: 2
+                anchors.right: rowMeta.left
+                anchors.rightMargin: Style.space(2)
+                anchors.verticalCenter: parent.verticalCenter
+                visible: chatRow.hasCursor && (chatRow.modelData.unread || 0) > 0
+                iconText: "\uf00c"
+                tooltipText: "Mark as read"
+                foreground: root.barForeground
+                fontFamily: root.fontFamily
+                size: Style.space(22)
+                onClicked: root.markChatRead(chatRow.modelData.jid)
+              }
+            }
+          }
+        }
+
+        // ── New message to a favorite ────────────────────────────────────
+        Column {
+          width: parent.width
+          spacing: Style.space(4)
+          visible: !root.showLogin && root.view === "compose"
+
+          Text {
+            width: parent.width
+            visible: !root.composePicking && root.visibleFavorites.length === 0
+            text: (root.searchQuery || "").trim().length > 0
+              ? "No matching favorites."
+              : "No favorites yet. Star a conversation, or add one below."
+            color: root.secondaryForeground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            wrapMode: Text.WordWrap
+          }
+
+          ListView {
+            id: favoriteList
+            width: parent.width
+            visible: !root.composePicking && root.visibleFavorites.length > 0
+            height: Math.min(contentHeight, Style.space(220))
+            model: root.visibleFavorites
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            currentIndex: root.cursorIndex
+            spacing: Style.space(1)
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            delegate: CursorSurface {
+              id: favRow
+              required property var modelData
+              required property int index
+
+              width: ListView.view.width
+              implicitHeight: favName.implicitHeight + Style.space(12)
+              height: implicitHeight
+              foreground: root.barForeground
+              accent: root.bar ? root.bar.urgent : Color.accent
+              hasCursor: !root.composePicking && root.cursorIndex === favRow.index
+              current: root.composeJid === favRow.modelData.jid
+
+              Text {
+                id: favName
+                anchors.left: parent.left
+                anchors.right: favRemove.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(8)
+                anchors.rightMargin: Style.space(6)
+                text: favRow.modelData.name || Model.prettyJid(favRow.modelData.jid)
+                color: root.barForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                font.bold: root.composeJid === favRow.modelData.jid
+                elide: Text.ElideRight
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (containsMouse) root.cursorIndex = favRow.index
+                onClicked: {
+                  root.composeJid = favRow.modelData.jid
+                  root.statusLine = ""
+                  Qt.callLater(function () { quickComposer.forceActiveFocus() })
+                }
+              }
+
+              PanelActionButton {
+                id: favRemove
+                z: 2
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(4)
+                anchors.verticalCenter: parent.verticalCenter
+                iconText: "\uf005"
+                tooltipText: "Remove from favorites"
+                foreground: root.barForeground
+                fontFamily: root.fontFamily
+                size: Style.space(22)
+                onClicked: root.toggleFavorite(favRow.modelData)
+              }
+            }
+          }
+
+          Button {
+            visible: !root.composePicking
+            text: "Add favorite"
+            bordered: true
+            foreground: root.barForeground
+            accent: root.bar ? root.bar.urgent : Color.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(3)
+            onClicked: {
+              root.composePicking = true
+              root.cursorIndex = 0
+              Qt.callLater(function () { keyCatcher.forceActiveFocus() })
+            }
+          }
+
+          Text {
+            width: parent.width
+            visible: root.composePicking && root.pickerChats.length === 0
+            text: (root.searchQuery || "").trim().length > 0
+              ? "No matching conversations."
+              : "No other conversations to add."
+            color: root.secondaryForeground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            wrapMode: Text.WordWrap
+          }
+
+          ListView {
+            id: favoritePicker
+            width: parent.width
+            visible: root.composePicking && root.pickerChats.length > 0
+            height: Math.min(contentHeight, Style.space(260))
+            model: root.pickerChats
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            currentIndex: root.cursorIndex
+            spacing: Style.space(1)
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            delegate: CursorSurface {
+              id: pickRow
+              required property var modelData
+              required property int index
+
+              width: ListView.view.width
+              implicitHeight: pickName.implicitHeight + Style.space(12)
+              height: implicitHeight
+              foreground: root.barForeground
+              accent: root.bar ? root.bar.urgent : Color.accent
+              hasCursor: root.composePicking && root.cursorIndex === pickRow.index
+
+              Text {
+                id: pickName
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: Style.space(8)
+                anchors.rightMargin: Style.space(8)
+                text: Model.chatTitle(pickRow.modelData)
+                color: root.barForeground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                elide: Text.ElideRight
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (containsMouse) root.cursorIndex = pickRow.index
+                onClicked: root.addFavorite(pickRow.modelData)
+              }
+            }
+          }
+
+          Item {
+            width: parent.width
+            visible: !root.composePicking
+            implicitHeight: Math.max(quickComposer.implicitHeight, quickSend.implicitHeight)
+
+            TextField {
+              id: quickComposer
+              anchors.left: parent.left
+              anchors.right: quickSend.left
+              anchors.rightMargin: Style.space(6)
+              anchors.verticalCenter: parent.verticalCenter
+              foreground: root.barForeground
+              accent: root.bar ? root.bar.urgent : Color.accent
+              placeholderText: root.composeTarget
+                ? "Message " + root.composeTarget.name + "\u2026"
+                : "Pick a favorite, then type\u2026"
+              enabled: root.linked && root.composeJid.length > 0
+              onAccepted: root.sendQuickMessage()
+              Keys.onEscapePressed: function (event) {
+                if (quickComposer.text.length > 0) quickComposer.text = ""
+                else root.back()
+                event.accepted = true
+              }
+            }
+
+            PanelActionButton {
+              id: quickSend
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "\uf1d8"
+              tooltipText: "Send"
+              enabled: root.linked && root.composeJid.length > 0 && quickComposer.text.trim().length > 0
+              foreground: root.barForeground
+              fontFamily: root.fontFamily
+              onClicked: root.sendQuickMessage()
             }
           }
         }

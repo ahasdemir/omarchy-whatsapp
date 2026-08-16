@@ -71,6 +71,17 @@ function chatTitle(chat) {
   return chat.name || prettyJid(chat.jid)
 }
 
+function chatMatches(chat, query) {
+  var q = String(query === undefined || query === null ? "" : query).trim().toLowerCase()
+  if (!q || !chat) return !q
+  if (chatTitle(chat).toLowerCase().indexOf(q) !== -1) return true
+  if (prettyJid(chat.jid).toLowerCase().indexOf(q) !== -1) return true
+  if (String(chat.jid || "").toLowerCase().indexOf(q) !== -1) return true
+  if (chat.lastText && oneLine(chat.lastText).toLowerCase().indexOf(q) !== -1) return true
+  if (chat.lastSender && String(chat.lastSender).toLowerCase().indexOf(q) !== -1) return true
+  return false
+}
+
 function prettyJid(jid) {
   if (!jid) return ""
   var parts = String(jid).split("@")

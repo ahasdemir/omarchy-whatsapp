@@ -80,6 +80,11 @@ systemctl --user edit omarchy-whatsapp     # Environment=OMARCHY_WHATSAPP_PAIRIN
 | Open the panel | Click the bar icon |
 | Move through chats | `j` / `k` or arrow keys |
 | Open a chat | `Enter` |
+| Find a chat or contact | Magnifying-glass icon, or `/` |
+| Show unread only | Filter button on the chat list |
+| Mark a chat read | Check icon on hover (chat stays in the unread list until the panel closes) |
+| Favorite a chat | Star icon on hover |
+| Quick message a favorite | Pencil icon, pick a favorite, type, `Enter` |
 | Reply | Type, then `Enter` |
 | Back to the chat list | `Escape` |
 | Close the panel | `Escape` from the list |
