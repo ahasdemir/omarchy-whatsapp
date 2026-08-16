@@ -12,6 +12,7 @@ export function normalizeJid(jid) {
   const [user, server] = String(jid).split('@')
   if (!user) return String(jid)
   const bare = user.split(':')[0]
+  if (server === 'c.us') return `${bare}@s.whatsapp.net`
   return server ? `${bare}@${server}` : bare
 }
 
@@ -41,6 +42,19 @@ export class Store {
     this._dirty = false
   }
 
+  canonicalJid(jid) {
+    const key = normalizeJid(jid)
+    if (!key) return ''
+    const target = this.aliases.get(key)
+    if (target) {
+      const normTarget = normalizeJid(target)
+      if (normTarget.endsWith('@s.whatsapp.net')) return normTarget
+      if (key.endsWith('@s.whatsapp.net')) return key
+      return normTarget || key
+    }
+    return key
+  }
+
   load() {
     let raw
     try {
@@ -61,6 +75,13 @@ export class Store {
       for (const list of this.messages.values()) {
         for (const message of list) {
           if (message.imagePath && !existsSync(message.imagePath)) message.imagePath = ''
+        }
+      }
+      for (const [from, to] of this.aliases.entries()) {
+        const primary = this.canonicalJid(from)
+        const secondary = (primary === normalizeJid(from)) ? normalizeJid(to) : normalizeJid(from)
+        if (primary && secondary && primary !== secondary) {
+          this._mergeJids(primary, secondary)
         }
       }
       this.applyNamesToChats()
@@ -104,8 +125,6 @@ export class Store {
     }
     const tmp = `${storeFile}.tmp`
     try {
-      // Write-then-rename: a crash mid-write leaves the previous snapshot
-      // intact instead of a half-written file the next start cannot parse.
       writeFileSync(tmp, JSON.stringify(payload), { mode: 0o600 })
       renameSync(tmp, storeFile)
     } catch (err) {
@@ -115,7 +134,7 @@ export class Store {
 
   rememberName(jid, name) {
     if (!jid || !name) return false
-    const key = normalizeJid(jid)
+    const key = this.canonicalJid(jid) || normalizeJid(jid)
     const clean = String(name).trim().replace(/[\u200e\u200f\u202a-\u202e]/g, '')
     if (!key || !clean) return false
 
@@ -128,11 +147,12 @@ export class Store {
 
     this.names.set(key, clean)
     const aliased = this.aliases.get(key)
-    if (aliased && (isPlaceholderName(this.names.get(aliased)) || !this.names.get(aliased))) {
-      this.names.set(aliased, clean)
+    if (aliased) {
+      const normAliased = normalizeJid(aliased)
+      this.names.set(normAliased, clean)
+      this._applyName(normAliased, clean)
     }
     this._applyName(key, clean)
-    if (aliased) this._applyName(aliased, clean)
     this.markDirty()
     return true
   }
@@ -141,20 +161,84 @@ export class Store {
     const left = normalizeJid(a)
     const right = normalizeJid(b)
     if (!left || !right || left === right) return false
-    if (this.aliases.get(left) === right && this.aliases.get(right) === left) return false
-    this.aliases.set(left, right)
-    this.aliases.set(right, left)
-    const name = this.lookupName(left) || this.lookupName(right)
-    if (name) {
-      this.rememberName(left, name)
-      this.rememberName(right, name)
+
+    let primary = left
+    let secondary = right
+    if (right.endsWith('@s.whatsapp.net') && !left.endsWith('@s.whatsapp.net')) {
+      primary = right
+      secondary = left
     }
+
+    const prevP = this.aliases.get(primary)
+    const prevS = this.aliases.get(secondary)
+    if (prevP === secondary && prevS === primary) {
+      this._mergeJids(primary, secondary)
+      return false
+    }
+
+    this.aliases.set(primary, secondary)
+    this.aliases.set(secondary, primary)
+
+    const nameP = this.lookupName(primary)
+    const nameS = this.lookupName(secondary)
+    const bestName = (!isPlaceholderName(nameP) ? nameP : nameS) || (!isPlaceholderName(nameS) ? nameS : '')
+    if (bestName) {
+      this.rememberName(primary, bestName)
+      this.rememberName(secondary, bestName)
+    }
+
+    this._mergeJids(primary, secondary)
     this.markDirty()
     return true
   }
 
+  _mergeJids(primary, secondary) {
+    if (!primary || !secondary || primary === secondary) return
+
+    const secondaryMsgs = this.messages.get(secondary)
+    if (secondaryMsgs && secondaryMsgs.length > 0) {
+      const primaryMsgs = this.messages.get(primary) || []
+      const mergedMap = new Map()
+      for (const m of primaryMsgs) mergedMap.set(m.id, m)
+      for (const m of secondaryMsgs) {
+        if (!mergedMap.has(m.id)) {
+          mergedMap.set(m.id, m)
+        } else {
+          mergedMap.set(m.id, { ...mergedMap.get(m.id), ...m })
+        }
+      }
+      const mergedList = [...mergedMap.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0))
+      if (mergedList.length > MAX_MESSAGES_PER_CHAT) {
+        mergedList.splice(0, mergedList.length - MAX_MESSAGES_PER_CHAT)
+      }
+      this.messages.set(primary, mergedList)
+      this.messages.delete(secondary)
+    }
+
+    const chatS = this.chats.get(secondary)
+    if (chatS) {
+      const chatP = this.chat(primary)
+      if ((chatS.lastTs || 0) > (chatP.lastTs || 0)) {
+        chatP.lastTs = chatS.lastTs
+        chatP.lastText = chatS.lastText
+        chatP.lastFromMe = chatS.lastFromMe
+        chatP.lastSender = chatS.lastSender
+      }
+      chatP.unread = Math.max(chatP.unread || 0, chatS.unread || 0)
+      chatP.muted = chatP.muted || chatS.muted
+      chatP.archived = chatP.archived || chatS.archived
+      chatP.pinned = chatP.pinned || chatS.pinned
+
+      if (isPlaceholderName(chatP.name) && !isPlaceholderName(chatS.name)) {
+        chatP.name = chatS.name
+      }
+
+      this.chats.delete(secondary)
+    }
+  }
+
   lookupName(jid) {
-    const key = normalizeJid(jid)
+    const key = this.canonicalJid(jid) || normalizeJid(jid)
     if (!key) return ''
     return this.names.get(key) || this.names.get(this.aliases.get(key) || '') || ''
   }
@@ -164,7 +248,8 @@ export class Store {
   }
 
   _applyName(jid, name) {
-    const chat = this.chats.get(jid)
+    const key = this.canonicalJid(jid) || normalizeJid(jid)
+    const chat = this.chats.get(key)
     if (!chat) return
     if (chat.nameLocked && !isPlaceholderName(chat.name)) return
     if (chat.name === name) return
@@ -187,7 +272,7 @@ export class Store {
   }
 
   chat(jid) {
-    const key = normalizeJid(jid) || jid
+    const key = this.canonicalJid(jid) || normalizeJid(jid) || jid
     let chat = this.chats.get(key)
     if (!chat) {
       chat = {
@@ -212,18 +297,15 @@ export class Store {
     return chat
   }
 
-  // Insert or replace a message, keeping each chat's list sorted by timestamp
-  // so out-of-order delivery (history sync racing live traffic) still renders
-  // in the right order.
   upsertMessage(jid, message) {
-    const key = normalizeJid(jid) || jid
-    const list = this.messages.get(key) || this.messages.get(jid) || []
+    const key = this.canonicalJid(jid) || normalizeJid(jid) || jid
+    const list = this.messages.get(key) || []
     const existing = list.findIndex((m) => m.id === message.id)
     if (existing !== -1) {
       list[existing] = { ...list[existing], ...message }
     } else {
       list.push(message)
-      list.sort((a, b) => a.ts - b.ts)
+      list.sort((a, b) => (a.ts || 0) - (b.ts || 0))
       if (list.length > MAX_MESSAGES_PER_CHAT) list.splice(0, list.length - MAX_MESSAGES_PER_CHAT)
     }
     this.messages.set(key, list)
@@ -231,12 +313,10 @@ export class Store {
     return list
   }
 
-  // A chat's preview line only moves forward in time, so a late history-sync
-  // message can never overwrite the newest one the user just received.
   touchChat(jid, message) {
     const chat = this.chat(jid)
-    if (message.ts >= (chat.lastTs || 0)) {
-      chat.lastTs = message.ts
+    if ((message.ts || 0) >= (chat.lastTs || 0)) {
+      chat.lastTs = message.ts || 0
       chat.lastText = message.text
       chat.lastFromMe = !!message.fromMe
       chat.lastSender = message.senderName || ''
@@ -284,21 +364,21 @@ export class Store {
   }
 
   messageList(jid, limit = 60) {
-    const list = this.messages.get(normalizeJid(jid) || jid) || this.messages.get(jid) || []
+    const key = this.canonicalJid(jid) || normalizeJid(jid) || jid
+    const list = this.messages.get(key) || []
     return list.slice(-Math.max(1, limit))
   }
 
   findMessage(jid, id) {
     if (!id) return null
-    const keys = [jid, normalizeJid(jid), this.aliases.get(normalizeJid(jid) || jid)].filter(Boolean)
-    for (const key of keys) {
-      const list = this.messages.get(key)
-      const found = list?.find((m) => m.id === id)
-      if (found) return found
-    }
-    for (const list of this.messages.values()) {
-      const found = list.find((m) => m.id === id)
-      if (found) return found
+    const key = this.canonicalJid(jid) || normalizeJid(jid) || jid
+    const list = this.messages.get(key)
+    const found = list?.find((m) => m.id === id)
+    if (found) return found
+
+    for (const l of this.messages.values()) {
+      const f = l.find((m) => m.id === id)
+      if (f) return f
     }
     return null
   }
@@ -313,3 +393,4 @@ export class Store {
     this.persist()
   }
 }
+
