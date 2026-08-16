@@ -232,6 +232,16 @@ Panel {
   }
 
   Process {
+    id: linkLauncher
+    property string targetUrl: ""
+    command: ["xdg-open", targetUrl]
+    function open(url) {
+      targetUrl = url
+      running = true
+    }
+  }
+
+  Process {
     id: webLauncher
     command: [root.pluginDir + "/bin/omarchy-whatsapp-open", root.setting("webAppUrl", "https://web.whatsapp.com")]
   }
@@ -680,11 +690,25 @@ Panel {
                       id: bodyLabel
                       visible: bubbleRow.showBody
                       width: Math.min(implicitWidth, bubbleRow.maxInner)
-                      text: messageRow.modelData.text || ""
+                      textFormat: Text.StyledText
+                      text: Model.formatMessageText(messageRow.modelData.text, root.bar ? root.bar.urgent : Color.accent)
                       color: root.barForeground
+                      linkColor: root.bar ? root.bar.urgent : Color.accent
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.body
                       wrapMode: Text.Wrap
+                      onLinkActivated: function (link) {
+                        if (link) {
+                          if (!Qt.openUrlExternally(link)) linkLauncher.open(link)
+                        }
+                      }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton
+                        hoverEnabled: true
+                        cursorShape: bodyLabel.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+                      }
                     }
 
                     Text {
