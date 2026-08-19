@@ -119,6 +119,7 @@ BarWidget {
     }
     onPressed: function (buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
+      else if (buttonCode === Qt.MiddleButton) root.openAppWindow()
       else if (buttonCode === Qt.RightButton) root.openWebClient()
     }
   }
