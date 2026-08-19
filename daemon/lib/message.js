@@ -104,11 +104,24 @@ export function messageType(message) {
   return getContentType(content) || ''
 }
 
+function unwrapMessage(content) {
+  if (!content) return null
+  let curr = content
+  if (curr.viewOnceMessage?.message) curr = curr.viewOnceMessage.message
+  if (curr.viewOnceMessageV2?.message) curr = curr.viewOnceMessageV2.message
+  if (curr.viewOnceMessageV2Extension?.message) curr = curr.viewOnceMessageV2Extension.message
+  if (curr.ephemeralMessage?.message) curr = curr.ephemeralMessage.message
+  if (curr.documentWithCaptionMessage?.message) curr = curr.documentWithCaptionMessage.message
+  if (curr.editedMessage?.message?.protocolMessage?.editedMessage) curr = curr.editedMessage.message.protocolMessage.editedMessage
+  return curr
+}
+
 // Flatten a Baileys message into the single preview line the panel and the
 // notification both want. Media becomes "<icon> Photo" or "<icon> caption".
 export function messageText(message) {
-  const content = normalizeMessageContent(message)
-  if (!content) return ''
+  const rawContent = normalizeMessageContent(message)
+  if (!rawContent) return ''
+  const content = unwrapMessage(rawContent) || rawContent
 
   if (typeof content.conversation === 'string' && content.conversation) return content.conversation
   if (content.extendedTextMessage?.text) return content.extendedTextMessage.text
@@ -119,6 +132,50 @@ export function messageText(message) {
   if (type === 'reactionMessage') {
     const emoji = content.reactionMessage?.text || ''
     return emoji ? `Reacted ${emoji}` : 'Removed a reaction'
+  }
+
+  // Interactive / Business / Bot messages
+  if (type === 'interactiveMessage') {
+    const body = content.interactiveMessage?.body?.text
+    const header = content.interactiveMessage?.header?.title
+    const title = header ? `${header}\n${body || ''}` : body
+    if (title) return title.trim()
+  }
+
+  if (type === 'templateMessage') {
+    const tmpl = content.templateMessage?.hydratedTemplate || content.templateMessage?.fourRowTemplate
+    const text = tmpl?.hydratedContentText || tmpl?.contentText || tmpl?.hydratedTitleText || tmpl?.title
+    if (text) return text.trim()
+  }
+
+  if (type === 'buttonsMessage') {
+    const text = content.buttonsMessage?.contentText || content.buttonsMessage?.caption || content.buttonsMessage?.text
+    if (text) return text.trim()
+  }
+
+  if (type === 'listMessage') {
+    const text = content.listMessage?.description || content.listMessage?.title
+    if (text) return text.trim()
+  }
+
+  if (type === 'interactiveResponseMessage') {
+    const text = content.interactiveResponseMessage?.body?.text || content.interactiveResponseMessage?.nativeFlowResponseMessage?.name
+    if (text) return text.trim()
+  }
+
+  if (type === 'templateButtonReplyMessage') {
+    const text = content.templateButtonReplyMessage?.selectedDisplayText || content.templateButtonReplyMessage?.selectedId
+    if (text) return text.trim()
+  }
+
+  if (type === 'buttonsResponseMessage') {
+    const text = content.buttonsResponseMessage?.selectedDisplayText || content.buttonsResponseMessage?.selectedButtonId
+    if (text) return text.trim()
+  }
+
+  if (type === 'listResponseMessage') {
+    const text = content.listResponseMessage?.title || content.listResponseMessage?.singleSelectReply?.selectedRowId
+    if (text) return text.trim()
   }
 
   if (type === 'documentWithCaptionMessage') {
@@ -152,8 +209,9 @@ function prefixed(type, text) {
 // True when the message is bookkeeping the user never sees, so it must not
 // bump a chat's preview line, unread count, or fire a notification.
 export function isSilent(message) {
-  const content = normalizeMessageContent(message)
-  if (!content) return true
+  const rawContent = normalizeMessageContent(message)
+  if (!rawContent) return true
+  const content = unwrapMessage(rawContent) || rawContent
   const type = getContentType(content)
   if (!type) return true
   if (SILENT_TYPES.has(type)) return true
