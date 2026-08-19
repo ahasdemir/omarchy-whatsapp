@@ -18,7 +18,12 @@ Item {
 
   readonly property string defaultSocketPath: {
     var runtime = Quickshell.env("XDG_RUNTIME_DIR")
-    return (runtime && runtime.length > 0 ? runtime : "/tmp") + "/omarchy-whatsapp.sock"
+    if (runtime && runtime.length > 0) return runtime + "/omarchy-whatsapp.sock"
+    var state = Quickshell.env("XDG_STATE_HOME")
+    if (state && state.length > 0) return state + "/omarchy-whatsapp/omarchy-whatsapp.sock"
+    var home = Quickshell.env("HOME")
+    if (home && home.length > 0) return home + "/.local/state/omarchy-whatsapp/omarchy-whatsapp.sock"
+    return "/run/user/1000/omarchy-whatsapp.sock"
   }
   readonly property string effectiveSocketPath: socketPath && socketPath.length > 0 ? socketPath : defaultSocketPath
 
