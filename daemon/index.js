@@ -274,9 +274,25 @@ function applyChatMetadata(rawChats) {
     if (raw.name) store.rememberName(canonical, raw.name)
 
     if (raw.unreadCount !== undefined && raw.unreadCount !== null) {
-      const count = typeof raw.unreadCount === 'number' ? Math.max(0, raw.unreadCount) : 0
+      let count = 0
+      if (typeof raw.unreadCount === 'number') {
+        // In WhatsApp protocol, unreadCount = -1 means "marked as unread" on another device
+        count = raw.unreadCount < 0 ? 1 : raw.unreadCount
+      }
       if (chat.unread !== count) {
         store.setUnread(canonical, count)
+        unreadChanged = true
+      }
+      chat.lastUnreadSync = Date.now()
+    } else if (raw.unread === true || raw.markedUnread === true) {
+      if (chat.unread === 0) {
+        store.setUnread(canonical, 1)
+        unreadChanged = true
+      }
+      chat.lastUnreadSync = Date.now()
+    } else if (raw.unread === false || raw.read === true) {
+      if (chat.unread !== 0) {
+        store.setUnread(canonical, 0)
         unreadChanged = true
       }
       chat.lastUnreadSync = Date.now()
