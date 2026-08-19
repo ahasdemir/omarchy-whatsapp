@@ -208,6 +208,55 @@ Scope {
     Rectangle {
       anchors.fill: parent
       color: window.bgBase
+      focus: true
+      Keys.priority: Keys.BeforeItem
+      Keys.onPressed: function(event) {
+        if ((event.modifiers & Qt.ControlModifier)) {
+          if (event.key === Qt.Key_F || event.key === Qt.Key_Slash) {
+            searchInput.forceActiveFocus()
+            event.accepted = true
+            return
+          }
+          if (event.key === Qt.Key_1) {
+            window.navMode = "chats"
+            event.accepted = true
+            return
+          }
+          if (event.key === Qt.Key_2) {
+            window.navMode = "unread"
+            event.accepted = true
+            return
+          }
+          if (event.key === Qt.Key_3) {
+            window.navMode = "favorites"
+            event.accepted = true
+            return
+          }
+          if (event.key === Qt.Key_R) {
+            client.refresh()
+            event.accepted = true
+            return
+          }
+        }
+        if (event.key === Qt.Key_Escape) {
+          if (window.peekImagePath !== "") {
+            window.peekImagePath = ""
+            event.accepted = true
+            return
+          }
+          if (window.replyingToMessage) {
+            window.replyingToMessage = null
+            event.accepted = true
+            return
+          }
+          if (searchInput.activeFocus || window.searchFilter !== "") {
+            searchInput.text = ""
+            searchInput.focus = false
+            event.accepted = true
+            return
+          }
+        }
+      }
 
       RowLayout {
         anchors.fill: parent
