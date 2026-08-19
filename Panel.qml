@@ -1244,72 +1244,140 @@ Panel {
                     hoverEnabled: true
                   }
 
-                  // Sleek Omarchy Action Chip (Inside Top Right Corner of Bubble)
+                  // 3-Dots Action Menu Button (Appears on Hover)
                   Rectangle {
-                    id: actionChip
+                    id: dotsBtn
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.topMargin: Style.space(3)
                     anchors.rightMargin: Style.space(3)
-                    width: actionRow.implicitWidth + Style.space(10)
-                    height: Style.space(22)
-                    color: root.barForeground
+                    width: Style.space(18)
+                    height: Style.space(18)
+                    color: dotsMouse.containsMouse || menuPopup.opened ? root.barForeground : "transparent"
                     radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(3)
-                    visible: bubbleMouse.containsMouse || chipMouse.containsMouse
+                    visible: bubbleMouse.containsMouse || dotsMouse.containsMouse || menuPopup.opened
                     z: 10
 
-                    MouseArea {
-                      id: chipMouse
-                      anchors.fill: parent
-                      hoverEnabled: true
+                    Text {
+                      anchors.centerIn: parent
+                      text: "\uf142" // FontAwesome vertical ellipsis (⋮)
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      color: dotsMouse.containsMouse || menuPopup.opened
+                        ? Color.background
+                        : (messageRow.modelData.fromMe ? root.barForeground : root.secondaryForeground)
                     }
 
-                    Row {
-                      id: actionRow
-                      anchors.centerIn: parent
-                      spacing: Style.space(4)
+                    MouseArea {
+                      id: dotsMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: menuPopup.opened ? menuPopup.close() : menuPopup.open()
+                    }
 
-                      Item {
-                        width: Style.space(20); height: Style.space(20)
+                    Popup {
+                      id: menuPopup
+                      y: parent.height + 2
+                      x: parent.width - width
+                      width: Style.space(100)
+                      padding: Style.space(3)
+                      closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
 
-                        Text {
-                          anchors.centerIn: parent
-                          text: "\uf112" // Reply
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.caption
-                          color: replyBtnMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.accent) : Color.background
-                        }
-
-                        MouseArea {
-                          id: replyBtnMouse
-                          anchors.fill: parent
-                          hoverEnabled: true
-                          cursorShape: Qt.PointingHandCursor
-                          onClicked: {
-                            root.replyingToMessage = messageRow.modelData
-                            composer.forceActiveFocus()
-                          }
-                        }
+                      background: Rectangle {
+                        color: root.barForeground
+                        border.color: root.bar ? root.bar.urgent : Color.accent
+                        border.width: 1
+                        radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(4)
                       }
 
-                      Item {
-                        visible: messageRow.modelData.fromMe
-                        width: Style.space(20); height: Style.space(20)
+                      contentItem: Column {
+                        spacing: Style.space(2)
 
-                        Text {
-                          anchors.centerIn: parent
-                          text: "\uf1f8" // Delete
-                          font.family: root.fontFamily
-                          font.pixelSize: Style.font.caption
-                          color: deleteBtnMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.urgent) : Color.background
+                        // Option 1: Reply
+                        Rectangle {
+                          width: parent.width
+                          height: Style.space(22)
+                          color: replyItemMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.accent) : "transparent"
+                          radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(3)
+
+                          Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: Style.space(6)
+                            anchors.rightMargin: Style.space(6)
+                            spacing: Style.space(6)
+
+                            Text {
+                              anchors.verticalCenter: parent.verticalCenter
+                              text: "\uf112"
+                              font.family: root.fontFamily
+                              font.pixelSize: Style.font.caption
+                              color: Color.background
+                            }
+
+                            Text {
+                              anchors.verticalCenter: parent.verticalCenter
+                              text: "Yanıtla"
+                              font.family: root.fontFamily
+                              font.pixelSize: Style.font.caption
+                              color: Color.background
+                            }
+                          }
+
+                          MouseArea {
+                            id: replyItemMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                              menuPopup.close()
+                              root.replyingToMessage = messageRow.modelData
+                              composer.forceActiveFocus()
+                            }
+                          }
                         }
 
-                        MouseArea {
-                          id: deleteBtnMouse
-                          anchors.fill: parent
-                          hoverEnabled: true
-                          cursorShape: Qt.PointingHandCursor
-                          onClicked: root.client.deleteMessage(root.activeJid, messageRow.modelData.id)
+                        // Option 2: Delete (if sent by me)
+                        Rectangle {
+                          visible: messageRow.modelData.fromMe
+                          width: parent.width
+                          height: Style.space(22)
+                          color: deleteItemMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.urgent) : "transparent"
+                          radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(3)
+
+                          Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: Style.space(6)
+                            anchors.rightMargin: Style.space(6)
+                            spacing: Style.space(6)
+
+                            Text {
+                              anchors.verticalCenter: parent.verticalCenter
+                              text: "\uf1f8"
+                              font.family: root.fontFamily
+                              font.pixelSize: Style.font.caption
+                              color: Color.background
+                            }
+
+                            Text {
+                              anchors.verticalCenter: parent.verticalCenter
+                              text: "Sil"
+                              font.family: root.fontFamily
+                              font.pixelSize: Style.font.caption
+                              color: Color.background
+                            }
+                          }
+
+                          MouseArea {
+                            id: deleteItemMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                              menuPopup.close()
+                              root.client.deleteMessage(root.activeJid, messageRow.modelData.id)
+                            }
+                          }
                         }
                       }
                     }
