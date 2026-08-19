@@ -1362,7 +1362,7 @@ Panel {
                       closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
 
                       background: Rectangle {
-                        color: Style.normalFillFor(root.barForeground, Color.accent)
+                        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 1.0)
                         border.color: root.bar ? root.bar.urgent : Color.accent
                         border.width: 1
                         radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(4)
