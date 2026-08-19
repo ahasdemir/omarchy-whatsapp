@@ -245,9 +245,11 @@ function ingest(chatJid, raw, { live }) {
     store.rememberPushName(participant, raw.pushName)
   }
 
-  resolveGroupName(canonicalTarget)
-  if (!chat.isGroup && isPlaceholderName(store.lookupName(canonicalTarget))) {
-    resolveProfileName(canonicalTarget)
+  if (live) {
+    resolveGroupName(canonicalTarget)
+    if (!chat.isGroup && isPlaceholderName(store.lookupName(canonicalTarget))) {
+      resolveProfileName(canonicalTarget)
+    }
   }
 
   if (message.fromMe) {
@@ -774,11 +776,17 @@ async function connect() {
       if (sock !== thisSocket) return
       applyContacts(contacts)
       applyChatMetadata(chats)
-      for (const raw of messages || []) {
+      // Broadcast initial chats immediately so the UI is responsive right away
+      pushChats()
+
+      const rawMessages = messages || []
+      for (let i = 0; i < rawMessages.length; i++) {
+        const raw = rawMessages[i]
         const jid = raw?.key?.remoteJid
         if (jid) ingest(jid, raw, { live: false })
       }
-      logger.info({ chats: chats?.length || 0, messages: messages?.length || 0, isLatest }, 'history sync')
+      logger.info({ chats: chats?.length || 0, messages: rawMessages.length, isLatest }, 'history sync')
+
       for (const [jid, list] of store.messages) {
         if (!wantedChats.has(jid) && !wantedChats.has(normalizeJid(jid))) continue
         for (const message of list) {
@@ -786,6 +794,9 @@ async function connect() {
         }
       }
       pushChatsSoon()
+      setTimeout(() => {
+        resolveContactLids().catch((err) => logger.debug({ err }, 'contact resolve failed'))
+      }, 500).unref?.()
     })
 
     sock.ev.on('chats.upsert', (chats) => {
