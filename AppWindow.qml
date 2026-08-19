@@ -922,27 +922,39 @@ Scope {
 
                           // Sleek Omarchy Action Chip (Inside Top Right Corner of Bubble)
                           Rectangle {
+                            id: actionChip
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.topMargin: 4
                             anchors.rightMargin: 4
-                            width: actionRow.implicitWidth + 8
-                            height: 20
+                            width: actionRow.implicitWidth + 10
+                            height: 22
                             color: window.fgMain
                             radius: 3
-                            visible: bubbleMouse.containsMouse
+                            visible: bubbleMouse.containsMouse || chipMouse.containsMouse
                             z: 10
+
+                            MouseArea {
+                              id: chipMouse
+                              anchors.fill: parent
+                              hoverEnabled: true
+                            }
 
                             RowLayout {
                               id: actionRow
                               anchors.centerIn: parent
-                              spacing: 6
+                              spacing: 4
 
-                              Text {
-                                text: "\uf112" // Reply icon
-                                font.family: window.fontFamily
-                                font.pixelSize: 10
-                                color: replyBtnMouse.containsMouse ? window.borderActive : window.bgBase
+                              Item {
+                                implicitWidth: 20; implicitHeight: 20
+
+                                Text {
+                                  anchors.centerIn: parent
+                                  text: "\uf112" // Reply icon
+                                  font.family: window.fontFamily
+                                  font.pixelSize: 10
+                                  color: replyBtnMouse.containsMouse ? window.borderActive : window.bgBase
+                                }
 
                                 AppToolTip { visible: replyBtnMouse.containsMouse; text: "Reply to message" }
 
@@ -958,12 +970,17 @@ Scope {
                                 }
                               }
 
-                              Text {
+                              Item {
                                 visible: msgRow.isMe
-                                text: "\uf1f8" // Delete icon
-                                font.family: window.fontFamily
-                                font.pixelSize: 10
-                                color: deleteBtnMouse.containsMouse ? window.urgentColor : window.bgBase
+                                implicitWidth: 20; implicitHeight: 20
+
+                                Text {
+                                  anchors.centerIn: parent
+                                  text: "\uf1f8" // Delete icon
+                                  font.family: window.fontFamily
+                                  font.pixelSize: 10
+                                  color: deleteBtnMouse.containsMouse ? window.urgentColor : window.bgBase
+                                }
 
                                 AppToolTip { visible: deleteBtnMouse.containsMouse; text: "Delete message" }
 
