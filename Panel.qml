@@ -695,6 +695,15 @@ Panel {
             spacing: Style.space(2)
 
             PanelActionButton {
+              visible: root.linked
+              iconText: (root.client && root.client.notificationsMuted) ? "\uf1f6" : "\uf0f3"
+              tooltipText: (root.client && root.client.notificationsMuted) ? "Unmute desktop notifications" : "Mute desktop notifications"
+              foreground: (root.client && root.client.notificationsMuted) ? (root.bar ? root.bar.urgent : Color.urgent) : root.barForeground
+              fontFamily: root.fontFamily
+              onClicked: function () { if (root.client) root.client.toggleNotifications() }
+            }
+
+            PanelActionButton {
               visible: !root.showLogin && root.view !== "chat"
               iconText: "\uf002"
               tooltipText: root.searchOpen ? "Close search" : "Find contacts"

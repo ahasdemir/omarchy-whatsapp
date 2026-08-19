@@ -101,6 +101,7 @@ function state() {
     linked: isLinked(),
     me: store.me,
     unread: store.totalUnread(),
+    notificationsMuted: store.notificationsMuted,
     lastError,
     daemonPid: process.pid
   }
@@ -260,7 +261,7 @@ function ingest(chatJid, raw, { live }) {
     }
     chat.lastUnreadSync = now
 
-    if (message.ts >= startedAt) {
+    if (message.ts >= startedAt && !store.notificationsMuted) {
       const title = chat.isGroup ? (chat.name || 'Group') : (message.senderName || chat.name)
       const body = chat.isGroup ? `${message.senderName}: ${message.text}` : message.text
       notifier.queue({ jid: canonicalTarget, title, body, muted: !!chat.muted })
@@ -1023,6 +1024,14 @@ async function handleCommand(payload, reply) {
       bus.broadcast({ t: 'delete', jid: rawJid, messageId, chat: store.chat(canonical) })
       pushChats()
       reply({ t: 'ack', id, ok: true, jid: rawJid, messageId })
+      return
+    }
+
+    case 'notifications': {
+      const muted = payload.muted !== undefined ? !!payload.muted : !store.notificationsMuted
+      store.setNotificationsMuted(muted)
+      pushState()
+      reply({ t: 'ack', id, ok: true, notificationsMuted: store.notificationsMuted })
       return
     }
 

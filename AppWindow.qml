@@ -588,6 +588,26 @@ Scope {
                   spacing: 12
 
                   Text {
+                    text: client.notificationsMuted ? "\uf1f6" : "\uf0f3"
+                    font.family: window.fontFamily
+                    font.pixelSize: 12
+                    color: client.notificationsMuted ? window.urgentColor : (muteMouse.containsMouse ? window.fgMain : window.fgMuted)
+
+                    AppToolTip {
+                      visible: muteMouse.containsMouse
+                      text: client.notificationsMuted ? "Unmute desktop notifications" : "Mute desktop notifications"
+                    }
+
+                    MouseArea {
+                      id: muteMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: client.toggleNotifications()
+                    }
+                  }
+
+                  Text {
                     text: "?"
                     font.family: window.fontFamily
                     font.pixelSize: 13

@@ -38,6 +38,7 @@ Item {
   property string lastError: ""
   property var chats: []
   property string lastSocketError: ""
+  property bool notificationsMuted: false
   property bool pendingLogin: false
 
   // Whether the daemon is actually reachable.
@@ -98,6 +99,14 @@ Item {
   function deleteMessage(jid, messageId) {
     if (!jid || !messageId) return false
     return request({ t: "delete", jid: jid, id: messageId })
+  }
+
+  function toggleNotifications() {
+    return request({ t: "notifications" })
+  }
+
+  function setNotificationsMuted(muted) {
+    return request({ t: "notifications", muted: !!muted })
   }
 
   property bool setupTried: false
@@ -177,6 +186,7 @@ Item {
         root.qrVersion = frame.qrVersion || 0
         root.unread = frame.unread || 0
         root.me = frame.me || null
+        if (frame.notificationsMuted !== undefined) root.notificationsMuted = frame.notificationsMuted === true
         root.lastError = frame.lastError || ""
         if (frame.chats !== undefined) root.chats = frame.chats || []
         if (root.linked) root.pendingLogin = false

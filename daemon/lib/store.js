@@ -40,6 +40,7 @@ export class Store {
     /** @type {Map<string, string>} */
     this.aliases = new Map()
     this.me = null
+    this.notificationsMuted = false
     this._persistTimer = null
     this._dirty = false
   }
@@ -75,6 +76,7 @@ export class Store {
       for (const key of data.addressBookKeys || []) this.addressBookKeys.add(key)
       for (const [from, to] of Object.entries(data.aliases || {})) this.aliases.set(from, to)
       this.me = data.me || null
+      this.notificationsMuted = data.notificationsMuted === true
       for (const list of this.messages.values()) {
         for (const message of list) {
           if (message.imagePath && !existsSync(message.imagePath)) message.imagePath = ''
@@ -121,6 +123,7 @@ export class Store {
     const payload = {
       version: 2,
       me: this.me,
+      notificationsMuted: this.notificationsMuted,
       chats,
       messages,
       names: Object.fromEntries(this.names),
@@ -356,6 +359,12 @@ export class Store {
       return true
     }
     return false
+  }
+
+  setNotificationsMuted(muted) {
+    this.notificationsMuted = !!muted
+    this.markDirty()
+    return this.notificationsMuted
   }
 
   touchChat(jid, message) {
