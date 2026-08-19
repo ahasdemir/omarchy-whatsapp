@@ -79,7 +79,7 @@ NODE="$(wa_node)"
 say "Using Node $("$NODE" -v) at $NODE"
 
 # ── 1. Place the plugin ─────────────────────────────────────────────────────
-if [[ $SOURCE_DIR == "$PLUGIN_DIR" ]]; then
+if [[ $(readlink -f "$SOURCE_DIR") == $(readlink -f "$PLUGIN_DIR") ]]; then
   say "Already installed at $PLUGIN_DIR (in-place setup)"
 else
   say "Installing to $PLUGIN_DIR"

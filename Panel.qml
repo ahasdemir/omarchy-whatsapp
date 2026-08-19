@@ -729,6 +729,13 @@ Panel {
                           if (!Qt.openUrlExternally(link)) linkLauncher.open(link)
                         }
                       }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.NoButton
+                        hoverEnabled: true
+                        cursorShape: bodyLabel.hoveredLink.length > 0 ? Qt.PointingHandCursor : Qt.IBeamCursor
+                      }
                     }
 
                     Text {
