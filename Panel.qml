@@ -284,6 +284,15 @@ Panel {
     }
   }
 
+  property int loadedMessageLimit: 60
+
+  function loadMoreMessages() {
+    if (!root.activeJid || !root.client) return
+    root.loadedMessageLimit += 60
+    root.pinToLatest = false
+    root.client.loadMessages(root.activeJid, root.loadedMessageLimit)
+  }
+
   // Point the panel at a chat without touching read state. Used by the focus
   // broadcast: a notification must not clear the unread badge before the panel
   // is actually on screen. onOpenedChanged marks it read once it is.
@@ -292,6 +301,7 @@ Panel {
     root.activeJid = jid
     root.activeChat = null
     root.messages = []
+    root.loadedMessageLimit = root.messageLimit
     root.pinToLatest = true
     root.view = "chat"
     root.client.loadMessages(jid, root.messageLimit)
@@ -463,9 +473,16 @@ Panel {
     function onMessagesLoaded(jid, chat, messages) {
       if (jid !== root.activeJid) return
       root.activeChat = chat
-      root.pinToLatest = true
-      root.messages = messages || []
-      Qt.callLater(function () { messageList.positionViewAtEnd() })
+      var isFirstLoad = root.messages.length === 0
+      if (isFirstLoad || root.pinToLatest) {
+        root.pinToLatest = true
+        root.messages = messages || []
+        Qt.callLater(function () { messageList.positionViewAtEnd() })
+      } else {
+        root.keepMessagePlace(function () {
+          root.messages = messages || []
+        })
+      }
     }
 
     function onMessageArrived(jid, message, chat) {
@@ -1170,6 +1187,36 @@ Panel {
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
             onMovementEnded: root.pinToLatest = atYEnd
             onContentHeightChanged: if (root.pinToLatest) Qt.callLater(function () { messageList.positionViewAtEnd() })
+            onAtYBeginningChanged: {
+              if (atYBeginning && root.messages.length >= root.loadedMessageLimit && root.messages.length > 0) {
+                root.loadMoreMessages()
+              }
+            }
+
+            header: Item {
+              width: messageList.width
+              height: (root.messages.length >= root.loadedMessageLimit && root.messages.length > 0) ? Style.space(28) : 0
+              visible: root.messages.length >= root.loadedMessageLimit && root.messages.length > 0
+              Rectangle {
+                anchors.centerIn: parent
+                width: parent.width * 0.85
+                height: Style.space(22)
+                color: Qt.rgba(root.highlightColor.r, root.highlightColor.g, root.highlightColor.b, 0.15)
+                radius: Style.space(4)
+                Text {
+                  anchors.centerIn: parent
+                  text: "▲ Load older messages"
+                  color: root.highlightColor
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                }
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.loadMoreMessages()
+                }
+              }
+            }
 
             delegate: Column {
               id: messageRow
