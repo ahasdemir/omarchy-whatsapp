@@ -28,10 +28,13 @@ command="${1:-}"
 
 case $command in
 app) exec "$WA_BIN_DIR/omarchy-whatsapp-app" "$@" ;;
+toggle) exec "$WA_BIN_DIR/omarchy-whatsapp-app" --toggle ;;
+mute) exec "$WA_BIN_DIR/omarchy-whatsapp-ctl" notifications --muted true ;;
+unmute) exec "$WA_BIN_DIR/omarchy-whatsapp-ctl" notifications --muted false ;;
 login) exec "$WA_BIN_DIR/omarchy-whatsapp-login" "$@" ;;
 open) exec "$WA_BIN_DIR/omarchy-whatsapp-open" "$@" ;;
 focus) exec "$WA_BIN_DIR/omarchy-whatsapp-focus" "$@" ;;
-status | send | logout | reconnect | read | chats | messages | pair | ping)
+status | send | logout | reconnect | read | chats | messages | pair | ping | notifications)
   exec "$WA_BIN_DIR/omarchy-whatsapp-ctl" "$command" "$@"
   ;;
 ctl) exec "$WA_BIN_DIR/omarchy-whatsapp-ctl" "$@" ;;

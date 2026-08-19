@@ -9,4 +9,17 @@ if ! command -v quickshell >/dev/null 2>&1; then
   wa_die "quickshell is required to launch the standalone client window."
 fi
 
+case "$1" in
+--toggle)
+  if pgrep -f "quickshell.*AppWindow\.qml" >/dev/null 2>&1; then
+    pkill -f "quickshell.*AppWindow\.qml"
+    exit 0
+  fi
+  ;;
+--hide | --quit)
+  pkill -f "quickshell.*AppWindow\.qml"
+  exit 0
+  ;;
+esac
+
 exec quickshell -p "$APP_QML" "$@"
