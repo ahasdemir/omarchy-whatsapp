@@ -39,6 +39,7 @@ Panel {
   property bool composePicking: false
   property bool searchOpen: false
   property string searchQuery: ""
+  property var replyingToMessage: null
   readonly property int searchLimit: 200
 
   readonly property var chats: client ? client.chats : []
@@ -399,8 +400,10 @@ Panel {
       root.statusLine = "Not connected to WhatsApp"
       return
     }
-    if (root.client.sendMessage(root.activeJid, text)) {
+    var quotedId = root.replyingToMessage ? root.replyingToMessage.id : ""
+    if (root.client.sendMessage(root.activeJid, text, quotedId)) {
       composer.text = ""
+      root.replyingToMessage = null
       root.statusLine = ""
       typingTimer.stop()
       root.client.setTyping(root.activeJid, "paused")
@@ -516,6 +519,12 @@ Panel {
     function onMessageMedia(jid, messageId, imagePath) {
       if (jid !== root.activeJid || !imagePath) return
       root.patchMessage(messageId, { imagePath: imagePath })
+    }
+
+    function onMessageDeleted(jid, messageId, chat) {
+      if (jid !== root.activeJid) return
+      var list = root.messages.filter(function (m) { return m && m.id !== messageId })
+      root.messages = list
     }
 
     function onCommandFailed(command, message) {
@@ -1306,13 +1315,51 @@ Panel {
                     ? Style.selectedFillFor(root.barForeground, root.bar ? root.bar.urgent : Color.accent)
                     : Style.normalFillFor(root.barForeground, Color.accent)
 
+                  MouseArea {
+                    id: bubbleMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                  }
+
+                  Row {
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.topMargin: -Style.space(8)
+                    spacing: Style.space(4)
+                    visible: bubbleMouse.containsMouse
+                    z: 5
+
+                    PanelActionButton {
+                      width: Style.space(20); height: Style.space(20)
+                      iconText: "\uf112"
+                      tooltipText: "Reply"
+                      foreground: root.barForeground
+                      fontFamily: root.fontFamily
+                      onClicked: {
+                        root.replyingToMessage = messageRow.modelData
+                        composer.forceActiveFocus()
+                      }
+                    }
+
+                    PanelActionButton {
+                      visible: messageRow.modelData.fromMe
+                      width: Style.space(20); height: Style.space(20)
+                      iconText: "\uf1f8"
+                      tooltipText: "Delete"
+                      foreground: root.bar ? root.bar.urgent : Color.urgent
+                      fontFamily: root.fontFamily
+                      onClicked: root.client.deleteMessage(root.activeJid, messageRow.modelData.id)
+                    }
+                  }
+
                   Column {
                     id: bubbleContent
                     x: bubbleRow.pad
                     y: bubbleRow.pad / 2
-                    spacing: Style.space(1)
+                    spacing: Style.space(2)
                     width: Math.max(
                       bubbleRow.showSender ? senderLabel.width : 0,
+                      quotedPreviewBox.visible ? quotedPreviewBox.width : 0,
                       bubbleRow.hasImage ? photo.width : 0,
                       bodyLabel.visible ? bodyLabel.width : 0,
                       Math.min(metaLabel.implicitWidth, bubbleRow.maxInner))
@@ -1327,6 +1374,50 @@ Panel {
                       font.pixelSize: Style.font.caption
                       font.bold: true
                       elide: Text.ElideRight
+                    }
+
+                    Rectangle {
+                      id: quotedPreviewBox
+                      visible: !!(messageRow.modelData && messageRow.modelData.quotedText)
+                      width: Math.min(quotedInnerCol.implicitWidth + Style.space(12), bubbleRow.maxInner)
+                      height: quotedInnerCol.implicitHeight + Style.space(6)
+                      color: Style.normalFillFor(root.barForeground, Color.accent)
+                      radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(4)
+
+                      Row {
+                        anchors.fill: parent
+                        anchors.margins: Style.space(3)
+                        spacing: Style.space(4)
+
+                        Rectangle {
+                          width: 2
+                          height: parent.height
+                          color: root.bar ? root.bar.urgent : Color.accent
+                        }
+
+                        Column {
+                          id: quotedInnerCol
+                          width: parent.width - Style.space(10)
+                          spacing: 1
+
+                          Text {
+                            text: messageRow.modelData.quotedSender || "Quoted message"
+                            color: root.bar ? root.bar.urgent : Color.accent
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.caption
+                            font.bold: true
+                          }
+
+                          Text {
+                            width: parent.width
+                            text: messageRow.modelData.quotedText || ""
+                            color: root.secondaryForeground
+                            font.family: root.fontFamily
+                            font.pixelSize: Style.font.caption
+                            elide: Text.ElideRight
+                          }
+                        }
+                      }
                     }
 
                     Image {
@@ -1419,6 +1510,62 @@ Panel {
             color: root.secondaryForeground
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+          }
+
+          // Quoted Reply Preview Banner above Inline reply
+          Rectangle {
+            id: replyBanner
+            width: parent.width
+            height: root.replyingToMessage ? Style.space(28) : 0
+            visible: !!root.replyingToMessage
+            color: Style.selectedFillFor(root.barForeground, Color.accent)
+            radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(4)
+
+            Row {
+              anchors.fill: parent
+              anchors.margins: Style.space(4)
+              spacing: Style.space(6)
+
+              Rectangle {
+                width: 2
+                height: parent.height
+                color: root.bar ? root.bar.urgent : Color.accent
+              }
+
+              Column {
+                width: parent.width - Style.space(30)
+                spacing: 1
+
+                Text {
+                  text: root.replyingToMessage ? (root.replyingToMessage.senderName || (root.replyingToMessage.fromMe ? "You" : "Sender")) : ""
+                  color: root.bar ? root.bar.urgent : Color.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+
+                Text {
+                  width: parent.width
+                  text: root.replyingToMessage ? (root.replyingToMessage.text || "") : ""
+                  color: root.secondaryForeground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  elide: Text.ElideRight
+                }
+              }
+
+              Text {
+                text: "✕"
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                color: root.secondaryForeground
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.replyingToMessage = null
+                }
+              }
+            }
           }
 
           // ── Inline reply ───────────────────────────────────────────────
