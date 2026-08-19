@@ -1110,7 +1110,7 @@ Scope {
                     // Quoted Reply Preview Banner above Composer
                     Rectangle {
                       Layout.fillWidth: true
-                      height: window.replyingToMessage ? 36 : 0
+                      height: window.replyingToMessage ? 42 : 0
                       visible: !!window.replyingToMessage
                       color: window.bgSidebar
                       border.color: window.borderColor
