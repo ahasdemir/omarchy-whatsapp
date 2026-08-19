@@ -3,6 +3,7 @@
 // `npm install` has ever run in daemon/.
 
 import net from 'node:net'
+import { lstatSync } from 'node:fs'
 import { socketPath } from './lib/paths.js'
 
 const [command, ...args] = process.argv.slice(2)
@@ -73,6 +74,24 @@ function fail(message) {
 }
 
 const request = buildRequest()
+
+try {
+  const stat = lstatSync(socketPath)
+  if (!stat.isSocket()) {
+    fail(`security error: ${socketPath} is not a unix socket`)
+  }
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+    fail(`security error: ${socketPath} is not owned by the current user (uid ${stat.uid} != ${process.getuid()})`)
+  }
+  if ((stat.mode & 0o077) !== 0) {
+    fail(`security error: ${socketPath} has insecure permissions (${(stat.mode & 0o777).toString(8)})`)
+  }
+} catch (err) {
+  if (err.code !== 'ENOENT') {
+    fail(`failed to verify socket ${socketPath}: ${err.message}`)
+  }
+}
+
 const socket = net.connect(socketPath)
 let buffer = ''
 let settled = false
