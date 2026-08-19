@@ -15,23 +15,23 @@ WhatsApp integration for [Omarchy](https://omarchy.org/): available both as an *
 
 Compared to the upstream repository (`srineshr1/omarchy-whatsapp`), this fork (`ahasdemir/omarchy-whatsapp`) includes major additions and architectural enhancements:
 
-* 📱 **Standalone Desktop Application Window (`AppWindow.qml`)**:
+* **Standalone Desktop Application Window (`AppWindow.qml`)**:
   Launch WhatsApp as a full-fledged native desktop app window via `omarchy-whatsapp app` or `omarchy-whatsapp-app`. Features live Omarchy OS theme synchronization (`colors.toml` / `shell.toml` theme watchers), collapsible sidebar navigation (*All Chats*, *Unread*, *Favorites*), and quick search.
-* 📜 **Scroll-to-Top Message Pagination**:
+* **Scroll-to-Top Message Pagination**:
   Scroll up in any chat to dynamically fetch and load older historical messages on demand.
-* 🔍 **Search, Favorites & Quick Compose**:
+* **Search, Favorites & Quick Compose**:
   Filter conversations with instant search, star favorite contacts, and compose quick messages from the sidebar or panel header.
-* 🖼️ **Full-Screen Desktop Image Peek**:
+* **Full-Screen Desktop Image Peek**:
   Click any image attachment to expand it into a full desktop modal preview overlay.
-* 🔗 **Clickable Web URLs**:
+* **Clickable Web URLs**:
   URLs inside message bodies are rendered as clickable links with hover pointer feedback.
-* 🔄 **Bi-Directional Read Status & 'Mark as Unread' Sync**:
+* **Bi-Directional Read Status & 'Mark as Unread' Sync**:
   Synchronizes read receipts and 'Mark as Unread' state seamlessly between your phone, the local daemon, and linked devices.
-* 📇 **Address Book Contact Name Priority**:
+* **Address Book Contact Name Priority**:
   Prioritizes phone address book contact names over generic WhatsApp push names for better contact identification.
-* ⚡ **Optimized Media Downloading Queue**:
+* **Optimized Media Downloading Queue**:
   Increased parallel download queues with automatic download prioritization for the currently active chat.
-* 🛠️ **JID Alias Unification & Business/Bot Support**:
+* **JID Alias Unification & Business/Bot Support**:
   Unified chat histories across aliased JIDs (resolving WhatsApp LID vs Phone Number JIDs) and clean support for business/bot messages.
 
 ---
