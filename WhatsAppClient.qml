@@ -60,6 +60,7 @@ Item {
   signal commandFailed(string command, string message)
   signal pairCodeReceived(string code)
   signal sendAcknowledged(string jid)
+  signal messageDeleted(string jid, string messageId, var chat)
 
   function request(payload) {
     var socket = socketLoader.item
@@ -92,6 +93,11 @@ Item {
     var payload = { t: "send", jid: jid, text: text }
     if (quotedId) payload.quoted = quotedId
     return request(payload)
+  }
+
+  function deleteMessage(jid, messageId) {
+    if (!jid || !messageId) return false
+    return request({ t: "delete", jid: jid, id: messageId })
   }
 
   property bool setupTried: false
@@ -196,6 +202,10 @@ Item {
 
       case "messageMedia":
         root.messageMedia(frame.jid || "", frame.id || "", frame.imagePath || "")
+        break
+
+      case "delete":
+        root.messageDeleted(frame.jid || "", frame.messageId || "", frame.chat || null)
         break
 
       case "focus":
