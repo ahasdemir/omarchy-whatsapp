@@ -46,7 +46,13 @@ BarWidget {
   }
 
   function openWebClient() {
+    webLauncher.running = false
     webLauncher.running = true
+  }
+
+  function openAppWindow() {
+    appLauncher.running = false
+    appLauncher.running = true
   }
 
   // A notification click routes through the daemon, which broadcasts `focus` to
@@ -88,6 +94,11 @@ BarWidget {
   Process {
     id: webLauncher
     command: [root.pluginDir + "/bin/omarchy-whatsapp-open", root.setting("webAppUrl", "https://web.whatsapp.com")]
+  }
+
+  Process {
+    id: appLauncher
+    command: ["quickshell", "-p", root.pluginDir + "/AppWindow.qml"]
   }
 
   WidgetButton {

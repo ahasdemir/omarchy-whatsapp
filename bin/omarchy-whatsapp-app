@@ -1,0 +1,12 @@
+#!/bin/bash
+# Launches the custom Omarchy WhatsApp standalone client window via Quickshell.
+
+source "$(dirname "$(readlink -f "$0")")/_common.sh"
+
+APP_QML="$WA_ROOT/AppWindow.qml"
+
+if ! command -v quickshell >/dev/null 2>&1; then
+  wa_die "quickshell is required to launch the standalone client window."
+fi
+
+exec quickshell -p "$APP_QML" "$@"
