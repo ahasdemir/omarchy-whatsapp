@@ -27,6 +27,7 @@ command="${1:-}"
 [[ $# -gt 0 ]] && shift || true
 
 case $command in
+app) exec "$WA_BIN_DIR/omarchy-whatsapp-app" "$@" ;;
 login) exec "$WA_BIN_DIR/omarchy-whatsapp-login" "$@" ;;
 open) exec "$WA_BIN_DIR/omarchy-whatsapp-open" "$@" ;;
 focus) exec "$WA_BIN_DIR/omarchy-whatsapp-focus" "$@" ;;

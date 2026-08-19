@@ -408,7 +408,21 @@ Panel {
   }
 
   function openWebClient() {
-    webLauncher.running = true
+    if (root.hostWidget && root.hostWidget.openWebClient) {
+      root.hostWidget.openWebClient()
+    } else {
+      webLauncher.running = false
+      webLauncher.running = true
+    }
+  }
+
+  function openAppWindow() {
+    if (root.hostWidget && root.hostWidget.openAppWindow) {
+      root.hostWidget.openAppWindow()
+    } else {
+      appLauncher.running = false
+      appLauncher.running = true
+    }
   }
 
   function keepMessagePlace(fn) {
@@ -522,6 +536,11 @@ Panel {
   Process {
     id: webLauncher
     command: [root.pluginDir + "/bin/omarchy-whatsapp-open", root.setting("webAppUrl", "https://web.whatsapp.com")]
+  }
+
+  Process {
+    id: appLauncher
+    command: ["quickshell", "-p", root.pluginDir + "/AppWindow.qml"]
   }
 
   Process {
@@ -692,6 +711,17 @@ Panel {
               fontFamily: root.fontFamily
               onClicked: {
                 root.openWebClient()
+                root.close()
+              }
+            }
+
+            PanelActionButton {
+              iconText: "\uf2d0"
+              tooltipText: "Open standalone Omarchy WhatsApp application"
+              foreground: root.barForeground
+              fontFamily: root.fontFamily
+              onClicked: {
+                root.openAppWindow()
                 root.close()
               }
             }
