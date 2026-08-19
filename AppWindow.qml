@@ -75,14 +75,15 @@ Scope {
     property var replyingToMessage: null
 
     // Keyboard Shortcuts
-    Shortcut { sequence: "Ctrl+F"; onActivated: searchInput.forceActiveFocus() }
-    Shortcut { sequence: "Ctrl+/"; onActivated: searchInput.forceActiveFocus() }
-    Shortcut { sequence: "Ctrl+1"; onActivated: window.navMode = "chats" }
-    Shortcut { sequence: "Ctrl+2"; onActivated: window.navMode = "unread" }
-    Shortcut { sequence: "Ctrl+3"; onActivated: window.navMode = "favorites" }
-    Shortcut { sequence: "Ctrl+R"; onActivated: client.refresh() }
+    Shortcut { sequence: "Ctrl+F"; context: Qt.ApplicationShortcut; onActivated: searchInput.forceActiveFocus() }
+    Shortcut { sequence: "Ctrl+/"; context: Qt.ApplicationShortcut; onActivated: searchInput.forceActiveFocus() }
+    Shortcut { sequence: "Ctrl+1"; context: Qt.ApplicationShortcut; onActivated: window.navMode = "chats" }
+    Shortcut { sequence: "Ctrl+2"; context: Qt.ApplicationShortcut; onActivated: window.navMode = "unread" }
+    Shortcut { sequence: "Ctrl+3"; context: Qt.ApplicationShortcut; onActivated: window.navMode = "favorites" }
+    Shortcut { sequence: "Ctrl+R"; context: Qt.ApplicationShortcut; onActivated: client.refresh() }
     Shortcut {
       sequence: "Esc"
+      context: Qt.ApplicationShortcut
       onActivated: {
         if (window.peekImagePath !== "") {
           window.peekImagePath = ""

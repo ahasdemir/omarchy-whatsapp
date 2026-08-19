@@ -55,6 +55,16 @@ BarWidget {
     appLauncher.running = true
   }
 
+  function handleBarClick(buttonCode) {
+    if (buttonCode === Qt.LeftButton) root.toggle()
+    else if (buttonCode === Qt.MiddleButton) root.openAppWindow()
+    else if (buttonCode === Qt.RightButton) root.openWebClient()
+  }
+
+  function triggerPress(buttonCode) {
+    handleBarClick(buttonCode)
+  }
+
   // A notification click routes through the daemon, which broadcasts `focus` to
   // every connected panel. Only select here: `omarchy-whatsapp-focus` asks the
   // shell to open one panel, so opening them all here would pop a panel on
@@ -98,7 +108,7 @@ BarWidget {
 
   Process {
     id: appLauncher
-    command: ["quickshell", "-p", root.pluginDir + "/AppWindow.qml"]
+    command: [root.pluginDir + "/bin/omarchy-whatsapp-app"]
   }
 
   WidgetButton {
