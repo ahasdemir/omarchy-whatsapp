@@ -929,7 +929,7 @@ Scope {
                             anchors.rightMargin: 4
                             width: 20
                             height: 20
-                            color: dotsMouse.containsMouse || menuPopup.opened ? window.fgMain : "transparent"
+                            color: dotsMouse.containsMouse || menuPopup.opened ? window.bgSelected : "transparent"
                             radius: 3
                             visible: bubbleMouse.containsMouse || dotsMouse.containsMouse || menuPopup.opened
                             z: 10
@@ -939,9 +939,7 @@ Scope {
                               text: "\uf142" // FontAwesome vertical ellipsis (⋮)
                               font.family: window.fontFamily
                               font.pixelSize: 11
-                              color: dotsMouse.containsMouse || menuPopup.opened
-                                ? window.bgBase
-                                : (msgRow.isMe ? window.fgMain : window.fgMuted)
+                              color: dotsMouse.containsMouse || menuPopup.opened ? window.fgMain : window.fgMuted
                             }
 
                             MouseArea {
