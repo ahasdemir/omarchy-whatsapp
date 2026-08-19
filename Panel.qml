@@ -1244,34 +1244,55 @@ Panel {
                     hoverEnabled: true
                   }
 
-                  Row {
+                  // Sleek Omarchy Action Chip (Inside Top Right Corner of Bubble)
+                  Rectangle {
                     anchors.right: parent.right
                     anchors.top: parent.top
-                    anchors.topMargin: -Style.space(8)
-                    spacing: Style.space(4)
+                    anchors.topMargin: Style.space(3)
+                    anchors.rightMargin: Style.space(3)
+                    width: actionRow.implicitWidth + Style.space(6)
+                    height: Style.space(18)
+                    color: root.barForeground
+                    radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(3)
                     visible: bubbleMouse.containsMouse
-                    z: 5
+                    z: 10
 
-                    PanelActionButton {
-                      width: Style.space(20); height: Style.space(20)
-                      iconText: "\uf112"
-                      tooltipText: "Reply"
-                      foreground: root.barForeground
-                      fontFamily: root.fontFamily
-                      onClicked: {
-                        root.replyingToMessage = messageRow.modelData
-                        composer.forceActiveFocus()
+                    Row {
+                      id: actionRow
+                      anchors.centerIn: parent
+                      spacing: Style.space(6)
+
+                      Text {
+                        text: "\uf112" // Reply
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        color: replyBtnMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.accent) : Color.background
+                        MouseArea {
+                          id: replyBtnMouse
+                          anchors.fill: parent
+                          hoverEnabled: true
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: {
+                            root.replyingToMessage = messageRow.modelData
+                            composer.forceActiveFocus()
+                          }
+                        }
                       }
-                    }
 
-                    PanelActionButton {
-                      visible: messageRow.modelData.fromMe
-                      width: Style.space(20); height: Style.space(20)
-                      iconText: "\uf1f8"
-                      tooltipText: "Delete"
-                      foreground: root.bar ? root.bar.urgent : Color.urgent
-                      fontFamily: root.fontFamily
-                      onClicked: root.client.deleteMessage(root.activeJid, messageRow.modelData.id)
+                      Text {
+                        visible: messageRow.modelData.fromMe
+                        text: "\uf1f8" // Delete
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        color: deleteBtnMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.urgent) : Color.background
+                        MouseArea {
+                          id: deleteBtnMouse
+                          anchors.fill: parent
+                          hoverEnabled: true
+                          cursorShape: Qt.PointingHandCursor
+                          onClicked: root.client.deleteMessage(root.activeJid, messageRow.modelData.id)
+                        }
+                      }
                     }
                   }
 
