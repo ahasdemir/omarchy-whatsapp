@@ -74,6 +74,27 @@ Scope {
     property var favoriteJids: ({})
     property var replyingToMessage: null
 
+    // Keyboard Shortcuts
+    Shortcut { sequence: "Ctrl+F"; onActivated: searchInput.forceActiveFocus() }
+    Shortcut { sequence: "Ctrl+/"; onActivated: searchInput.forceActiveFocus() }
+    Shortcut { sequence: "Ctrl+1"; onActivated: window.navMode = "chats" }
+    Shortcut { sequence: "Ctrl+2"; onActivated: window.navMode = "unread" }
+    Shortcut { sequence: "Ctrl+3"; onActivated: window.navMode = "favorites" }
+    Shortcut { sequence: "Ctrl+R"; onActivated: client.refresh() }
+    Shortcut {
+      sequence: "Esc"
+      onActivated: {
+        if (window.peekImagePath !== "") {
+          window.peekImagePath = ""
+        } else if (window.replyingToMessage) {
+          window.replyingToMessage = null
+        } else if (searchInput.activeFocus || window.searchFilter !== "") {
+          searchInput.text = ""
+          searchInput.focus = false
+        }
+      }
+    }
+
     // Custom Omarchy Styled ToolTip
     component AppToolTip: ToolTip {
       id: tt
