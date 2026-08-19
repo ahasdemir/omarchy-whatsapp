@@ -6,7 +6,7 @@ import { mediaDir } from './paths.js'
 import { logger } from './logger.js'
 
 const MAX_BYTES = 12 * 1024 * 1024
-const MAX_PARALLEL = 2
+const MAX_PARALLEL = 5
 
 const EXT = {
   'image/jpeg': 'jpg',
@@ -70,7 +70,7 @@ export class MediaCache {
     this.getSocket = () => null
   }
 
-  enqueue(jid, message) {
+  enqueue(jid, message, { priority = false } = {}) {
     if (!message?.id || !message.media) return
     if (message.media.fileLength && message.media.fileLength > MAX_BYTES) return
     const already = existingMediaPath(message)
@@ -83,7 +83,11 @@ export class MediaCache {
     }
     if (this.inFlight.has(message.id)) return
     this.inFlight.add(message.id)
-    this.queue.push({ jid, message })
+    if (priority) {
+      this.queue.unshift({ jid, message })
+    } else {
+      this.queue.push({ jid, message })
+    }
     this.pump()
   }
 

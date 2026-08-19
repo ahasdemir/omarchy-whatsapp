@@ -870,7 +870,7 @@ async function handleCommand(payload, reply) {
           messages: list.map(publicMessage)
         })
         for (const message of list) {
-          if (message.media && !existingMediaPath(message)) media.enqueue(canonical, message)
+          if (message.media && !existingMediaPath(message)) media.enqueue(canonical, message, { priority: true })
         }
         refreshMissingImages(canonical, list).catch((err) => {
           logger.debug({ err, jid: canonical }, 'media: history refresh failed')
