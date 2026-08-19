@@ -22,4 +22,9 @@ case "$1" in
   ;;
 esac
 
-exec quickshell -p "$APP_QML" "$@"
+LAUNCHER=()
+if command -v uwsm-app >/dev/null 2>&1 && [[ -z "${UWSM_EXEC:-}" ]]; then
+  LAUNCHER=(uwsm-app --)
+fi
+
+exec "${LAUNCHER[@]}" quickshell -p "$APP_QML" "$@"
