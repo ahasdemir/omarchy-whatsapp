@@ -1246,27 +1246,40 @@ Panel {
 
                   // Sleek Omarchy Action Chip (Inside Top Right Corner of Bubble)
                   Rectangle {
+                    id: actionChip
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.topMargin: Style.space(3)
                     anchors.rightMargin: Style.space(3)
-                    width: actionRow.implicitWidth + Style.space(6)
-                    height: Style.space(18)
+                    width: actionRow.implicitWidth + Style.space(10)
+                    height: Style.space(22)
                     color: root.barForeground
                     radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(3)
-                    visible: bubbleMouse.containsMouse
+                    visible: bubbleMouse.containsMouse || chipMouse.containsMouse
                     z: 10
+
+                    MouseArea {
+                      id: chipMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
 
                     Row {
                       id: actionRow
                       anchors.centerIn: parent
-                      spacing: Style.space(6)
+                      spacing: Style.space(4)
 
-                      Text {
-                        text: "\uf112" // Reply
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        color: replyBtnMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.accent) : Color.background
+                      Item {
+                        width: Style.space(20); height: Style.space(20)
+
+                        Text {
+                          anchors.centerIn: parent
+                          text: "\uf112" // Reply
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption
+                          color: replyBtnMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.accent) : Color.background
+                        }
+
                         MouseArea {
                           id: replyBtnMouse
                           anchors.fill: parent
@@ -1279,12 +1292,18 @@ Panel {
                         }
                       }
 
-                      Text {
+                      Item {
                         visible: messageRow.modelData.fromMe
-                        text: "\uf1f8" // Delete
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        color: deleteBtnMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.urgent) : Color.background
+                        width: Style.space(20); height: Style.space(20)
+
+                        Text {
+                          anchors.centerIn: parent
+                          text: "\uf1f8" // Delete
+                          font.family: root.fontFamily
+                          font.pixelSize: Style.font.caption
+                          color: deleteBtnMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.urgent) : Color.background
+                        }
+
                         MouseArea {
                           id: deleteBtnMouse
                           anchors.fill: parent
