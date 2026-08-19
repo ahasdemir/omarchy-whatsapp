@@ -56,6 +56,12 @@ function buildRequest() {
       return { t: 'reconnect' }
     case 'logout':
       return { t: 'logout' }
+    case 'notifications': {
+      let muted = undefined
+      if (args.includes('--muted') || args.includes('true') || args.includes('mute')) muted = true
+      if (args.includes('--unmuted') || args.includes('false') || args.includes('unmute')) muted = false
+      return { t: 'notifications', muted }
+    }
     default:
       fail(`unknown command: ${command}\n\n${USAGE}`)
   }
