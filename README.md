@@ -1,211 +1,218 @@
 # WhatsApp for Omarchy
 
-WhatsApp in the Omarchy Quattro bar: unread badge, desktop notifications you can
-click, inline reply without leaving the bar, and one keystroke to the full
-WhatsApp Web client when you need media, calls, or search.
+> **Note**: This repository is an enhanced fork of [`srineshr1/omarchy-whatsapp`](https://github.com/srineshr1/omarchy-whatsapp) maintained by [ahasdemir](https://github.com/ahasdemir).
+
+WhatsApp integration for [Omarchy](https://omarchy.org/): available both as an **Omarchy Quattro bar widget** (unread badge, desktop notifications, inline reply, bar dropdown) and as a **standalone native desktop application window** (`omarchy-whatsapp app`).
 
 <p align="center">
   <img src="docs/inbox.png" alt="Chat list in the Omarchy bar" width="48%" />
   <img src="docs/chat.png" alt="Conversation with inline reply" width="48%" />
 </p>
 
-## How it works
+---
 
-Two pieces, on purpose:
+## Key Features & Fork Differences
 
-| Piece | Job |
-|-------|-----|
-| **Bridge daemon** (Node + [Baileys](https://github.com/WhiskeySockets/Baileys)) | Holds one linked-device session, receives messages, sends notifications, sends your replies |
-| **Bar plugin** (QML) | Unread badge, chat list, conversation view, reply box |
+Compared to the upstream repository (`srineshr1/omarchy-whatsapp`), this fork (`ahasdemir/omarchy-whatsapp`) includes major additions and architectural enhancements:
 
-They talk NDJSON over a unix socket in `$XDG_RUNTIME_DIR` — no localhost port,
-no auth token, no browser running in the background just to get a notification.
-The daemon is the fan-out point, so bars on several monitors stay in sync and a
-notification click reaches whichever panel is on screen.
+* 📱 **Standalone Desktop Application Window (`AppWindow.qml`)**:
+  Launch WhatsApp as a full-fledged native desktop app window via `omarchy-whatsapp app` or `omarchy-whatsapp-app`. Features live Omarchy OS theme synchronization (`colors.toml` / `shell.toml` theme watchers), collapsible sidebar navigation (*All Chats*, *Unread*, *Favorites*), and quick search.
+* 📜 **Scroll-to-Top Message Pagination**:
+  Scroll up in any chat to dynamically fetch and load older historical messages on demand.
+* 🔍 **Search, Favorites & Quick Compose**:
+  Filter conversations with instant search, star favorite contacts, and compose quick messages from the sidebar or panel header.
+* 🖼️ **Full-Screen Desktop Image Peek**:
+  Click any image attachment to expand it into a full desktop modal preview overlay.
+* 🔗 **Clickable Web URLs**:
+  URLs inside message bodies are rendered as clickable links with hover pointer feedback.
+* 🔄 **Bi-Directional Read Status & 'Mark as Unread' Sync**:
+  Synchronizes read receipts and 'Mark as Unread' state seamlessly between your phone, the local daemon, and linked devices.
+* 📇 **Address Book Contact Name Priority**:
+  Prioritizes phone address book contact names over generic WhatsApp push names for better contact identification.
+* ⚡ **Optimized Media Downloading Queue**:
+  Increased parallel download queues with automatic download prioritization for the currently active chat.
+* 🛠️ **JID Alias Unification & Business/Bot Support**:
+  Unified chat histories across aliased JIDs (resolving WhatsApp LID vs Phone Number JIDs) and clean support for business/bot messages.
 
-The **full client** is separate on purpose too: the bar panel is for reading and
-replying, and the WhatsApp Web app window handles everything heavier. WhatsApp
-allows up to four linked devices, so the bridge and the web app can be linked at
-the same time.
+---
 
-## Install
+## How It Works
+
+The architecture consists of two decoupled layers communicating over a local Unix domain socket:
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Bridge Daemon** | Node.js + [Baileys](https://github.com/WhiskeySockets/Baileys) | Maintains linked-device session, receives messages, handles media queues, dispatches desktop notifications, and executes actions. |
+| **Frontend Clients** | QML / Qt Quick (Quickshell) | **Bar Widget (`BarWidget.qml` & `Panel.qml`)** for bar dropdowns/inline replies, and **Standalone App (`AppWindow.qml`)** for a full window view. |
+
+They communicate via NDJSON over `$XDG_RUNTIME_DIR/omarchy-whatsapp.sock`. The daemon acts as a fan-out hub so multiple bars or application windows stay synchronized seamlessly without running background browsers.
+
+---
+
+## Installation
+
+### Method 1: Omarchy Plugin Manager (Recommended)
 
 ```sh
-omarchy plugin add https://github.com/srineshr1/omarchy-whatsapp.git --enable --yes
+omarchy plugin add https://github.com/ahasdemir/omarchy-whatsapp.git --enable --yes
 ```
 
-That is enough. The first time the widget starts it installs Node deps, the
-`omarchy-whatsapp` user service, and CLI links. Click the icon and press Login.
+Upon first launch, the plugin automatically installs Node dependencies, registers the `omarchy-whatsapp` user service, and creates CLI symlinks in `~/.local/bin`.
 
-From a source checkout instead:
+### Method 2: From Source Checkout
 
 ```sh
-git clone https://github.com/srineshr1/omarchy-whatsapp.git
+git clone https://github.com/ahasdemir/omarchy-whatsapp.git
 cd omarchy-whatsapp
 ./install.sh
 ```
 
-Requirements: Omarchy 4 (Quattro) and Node.js 20+. If Node lives in a version
-manager (mise, proto, fnm, volta, nvm) setup finds it and pins the path into
-the service unit.
+### Requirements
+* **Omarchy 4 (Quattro)**
+* **Node.js 20+** (if using `mise`, `proto`, `fnm`, `nvm`, or `volta`, the setup script auto-detects and pins your Node path in the systemd service).
 
-## Link your account
+---
 
-Click the WhatsApp icon in the bar and scan the QR code, or:
+## Linking Your Account
+
+Click the WhatsApp icon in the bar or launch the app and scan the QR code. Alternatively, link via CLI:
 
 ```sh
-omarchy-whatsapp login                 # QR in the terminal
-omarchy-whatsapp login --pair 919812345678   # 8-digit code instead
+omarchy-whatsapp login                        # Display QR code in terminal
+omarchy-whatsapp login --pair 919812345678    # Pair using an 8-digit code
 ```
 
 On your phone: **Settings → Linked devices → Link a device**.
 
-The code refreshes itself every ~20 seconds (WhatsApp expires each one), so the
-panel always shows a live code — no need to reopen anything.
+*Note: The QR code refreshes automatically every ~20 seconds. If left unscanned for 5 minutes, pairing pauses automatically to conserve system resources. Click "Show QR code" or run `omarchy-whatsapp login` to resume.*
 
-After five minutes without a scan the daemon **pauses** and removes the code
-rather than leave an expired one on screen looking scannable. The panel then
-offers **Show QR code**, and `omarchy-whatsapp login` reopens the window too.
-That cap also keeps an unlinked install from polling WhatsApp's pairing endpoint
-forever. To change it:
+---
 
-```sh
-systemctl --user edit omarchy-whatsapp     # Environment=OMARCHY_WHATSAPP_PAIRING_WINDOW_MS=600000
-```
+## Usage & Interface Options
 
-## Use it
-
-| Action | How |
-|--------|-----|
-| Open the panel | Click the bar icon |
-| Move through chats | `j` / `k` or arrow keys |
-| Open a chat | `Enter` |
-| Find a chat or contact | Magnifying-glass icon, or `/` |
-| Show unread only | Filter button on the chat list |
-| Mark a chat read | Check icon on hover (chat stays in the unread list until the panel closes) |
-| Favorite a chat | Star icon on hover |
-| Quick message a favorite | Pencil icon, pick a favorite, type, `Enter` |
-| Reply | Type, then `Enter` |
-| Back to the chat list | `Escape` |
-| Close the panel | `Escape` from the list |
-| Full WhatsApp Web | Right-click the icon, or the ⧉ button in the panel |
-| Log out | Power button on the chat list |
-| Open a chat from a notification | Click the notification |
-
-Opening a chat marks it read on every device. Messages arriving while a
-conversation is open are marked read immediately.
-
-## CLI
+### 1. Standalone Application Window
+To run WhatsApp as a full-screen or floating application window:
 
 ```sh
-omarchy-whatsapp status                          # connection, account, unread
-omarchy-whatsapp send 919812345678@s.whatsapp.net "on my way"
-omarchy-whatsapp chats 10                        # recent chats as JSON
-omarchy-whatsapp focus 919812345678@s.whatsapp.net   # open the panel on a chat
-omarchy-whatsapp open                            # full web client
-omarchy-whatsapp restart | logs | logout
-omarchy-whatsapp uninstall                       # service, CLI, credentials
+omarchy-whatsapp app
+# or directly:
+omarchy-whatsapp-app
 ```
 
-The first widget start (or `omarchy-whatsapp setup`) links these into
-`~/.local/bin`. `omarchy-whatsapp-ctl -h` lists the raw daemon commands.
+### 2. Bar Panel & Keyboard Navigation
 
-## Settings
+| Action | Control / Shortcut |
+|--------|-------------------|
+| Open Bar Panel | Left-click the bar icon |
+| Standalone App Window | Right-click the bar icon or run `omarchy-whatsapp app` |
+| Move through chats | `j` / `k` or Arrow Keys |
+| Select / Open chat | `Enter` |
+| Search chats / contacts | Magnifying-glass icon or `/` |
+| Toggle Unread filter | Filter button on chat list |
+| Load older messages | Scroll up to top of chat list |
+| Favorite a chat | Star icon on hover or header |
+| Click links | Left-click any URL in message body |
+| Image preview peek | Left-click image attachment thumbnail |
+| Send reply | Type message and press `Enter` |
+| Close panel | `Escape` |
 
-Per-widget settings live inline on the bar entry in `~/.config/omarchy/shell.json`
-and hot-reload on save:
+---
+
+## CLI Reference
+
+```sh
+omarchy-whatsapp status                         # Connection state, account info, unread counts
+omarchy-whatsapp app                            # Launch standalone QML app window
+omarchy-whatsapp send 919812345678@s.whatsapp.net "On my way"
+omarchy-whatsapp chats 10                       # List recent chats as JSON
+omarchy-whatsapp focus 919812345678@s.whatsapp.net  # Focus bar panel/window on specific chat
+omarchy-whatsapp open                           # Open full WhatsApp Web client in browser
+omarchy-whatsapp restart                        # Restart background daemon service
+omarchy-whatsapp logs                           # View live daemon logs
+omarchy-whatsapp logout                         # Unlink device and purge session state
+omarchy-whatsapp uninstall                      # Remove systemd service, CLI links & credentials
+```
+
+---
+
+## Configuration & Settings
+
+Per-widget settings live in `~/.config/omarchy/shell.json` under your bar entries and hot-reload on save:
 
 ```json
-{ "id": "io.github.ricky.whatsapp", "showUnreadCount": true, "chatLimit": 40 }
+{
+  "id": "io.github.ricky.whatsapp",
+  "showUnreadCount": true,
+  "chatLimit": 40
+}
 ```
 
-| Key | Default | Meaning |
-|-----|---------|---------|
-| `socketPath` | `""` | Daemon socket; blank uses `$XDG_RUNTIME_DIR/omarchy-whatsapp.sock` |
-| `autostartDaemon` | `true` | Start the daemon if the socket is missing |
-| `showUnreadCount` | `true` | Show the count next to the icon |
-| `hideWhenEmpty` | `false` | Hide the widget entirely when nothing is unread |
-| `chatLimit` | `40` | Chats listed in the panel |
-| `messageLimit` | `60` | Messages loaded per conversation |
-| `webAppUrl` | `https://web.whatsapp.com` | Full client URL |
-| `webAppPattern` | `web.whatsapp.com` | Window pattern used to focus the full client |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `socketPath` | `""` | Socket path (blank defaults to `$XDG_RUNTIME_DIR/omarchy-whatsapp.sock`) |
+| `autostartDaemon` | `true` | Automatically launch the daemon if not running |
+| `showUnreadCount` | `true` | Display unread counter badge next to the bar icon |
+| `hideWhenEmpty` | `false` | Hide bar widget completely when there are 0 unread messages |
+| `chatLimit` | `40` | Maximum chats listed in panel |
+| `messageLimit` | `60` | Initial messages loaded per conversation |
+| `webAppUrl` | `https://web.whatsapp.com` | WhatsApp Web fallback URL |
 
-Move the widget:
+Position the bar widget using standard Omarchy commands:
 
 ```sh
 omarchy bar move io.github.ricky.whatsapp --section right
 ```
 
-## What it stores, and where
+---
 
-| Path | Contents |
-|------|----------|
-| `~/.local/state/omarchy-whatsapp/auth/` | Linked-device credentials and Signal keys (`0700`) |
-| `~/.local/state/omarchy-whatsapp/store.json` | Recent chats and up to 200 messages per chat (`0600`) |
-| `$XDG_RUNTIME_DIR/omarchy-whatsapp.sock` | Control socket (`0600`, cleared on logout) |
+## Data Storage & Privacy
 
-Nothing leaves your machine except traffic to WhatsApp itself. Media is never
-downloaded — photos and voice notes show as `📷 Photo`, `🎤 Voice message`, and
-so on. Open the full client for the real thing.
+| Location | Contents |
+|----------|----------|
+| `~/.local/state/omarchy-whatsapp/auth/` | Linked device credentials and Signal protocol keys (`0700`) |
+| `~/.local/state/omarchy-whatsapp/store.json` | Local chat cache & message history (`0600`) |
+| `~/.local/state/omarchy-whatsapp/media/` | Downloaded image & media cache (`0700`) |
+| `$XDG_RUNTIME_DIR/omarchy-whatsapp.sock` | Local control socket (`0600`) |
 
-`omarchy-whatsapp logout` unlinks the device and deletes all three.
+All data stays strictly on your local machine. No external servers are involved except direct encrypted traffic to WhatsApp's infrastructure.
 
-## Things worth knowing before you install
+To clear all stored session data:
 
-- **Baileys is an unofficial WhatsApp Web client.** It is not endorsed by
-  WhatsApp, and using it carries some risk to your account. It is the same
-  mechanism every WhatsApp bridge on Linux uses, but the risk is yours.
-- **The version is pinned deliberately.** `baileys@6.7.24`. npm's `latest`
-  (6.17.16) is deprecated for a message-spoofing zero-day
-  ([GHSA-qvv5-jq5g-4cgg](https://github.com/WhiskeySockets/Baileys/security/advisories/GHSA-qvv5-jq5g-4cgg));
-  do not bump it without checking that advisory.
-- **Plugins run unsandboxed inside `omarchy-shell`.** This one keeps its network
-  and protocol work in a separate process for exactly that reason — the QML side
-  only parses JSON from a socket it owns — but you should still read the code
-  before enabling it.
-- **The daemon stays "offline" to WhatsApp** (`markOnlineOnConnect: false`) so
-  your phone keeps its own notifications working.
-- **Read receipts are sent** when you open a chat, the same as opening it on your
-  phone.
+```sh
+omarchy-whatsapp logout
+```
+
+---
 
 ## Troubleshooting
 
-**Icon is dim / "Daemon offline"**
+- **Daemon Offline / Dim Icon**:
+  ```sh
+  systemctl --user status omarchy-whatsapp
+  journalctl --user -u omarchy-whatsapp -n 50
+  ```
+- **Node.js Path Issue**: If using a custom Node path, configure the service:
+  ```sh
+  systemctl --user edit omarchy-whatsapp
+  # Add: Environment=OMARCHY_WHATSAPP_NODE=/path/to/node
+  ```
+- **Widget Missing in Bar**:
+  ```sh
+  omarchy plugin list --json | jq '.[] | select(.id == "io.github.ricky.whatsapp")'
+  omarchy restart shell
+  ```
 
-```sh
-systemctl --user status omarchy-whatsapp
-journalctl --user -u omarchy-whatsapp -n 50
-```
+---
 
-**"no Node.js >= 20 found"** — install `nodejs`, or point the service at your
-interpreter: `systemctl --user edit omarchy-whatsapp` and add
-`Environment=OMARCHY_WHATSAPP_NODE=/path/to/node`.
-
-**Widget not in the bar**
-
-```sh
-omarchy plugin list --json | jq '.[] | select(.id == "io.github.ricky.whatsapp")'
-omarchy-shell shell rescanPlugins
-qs log -p "$OMARCHY_PATH/shell" --tail 100
-```
-
-**Stuck on "Reconnecting…"** — `omarchy-whatsapp ctl reconnect`, then re-link
-with `omarchy-whatsapp login` if the phone dropped the device.
-
-## Remove
+## Uninstallation
 
 ```sh
 omarchy plugin remove io.github.ricky.whatsapp
-```
-
-The next login (or `systemctl --user start omarchy-whatsapp-sweep`) deletes the
-user service, CLI links, credentials, and chat cache. To wipe immediately:
-
-```sh
-omarchy-whatsapp uninstall
-# or, from a source checkout:
+# or from source checkout:
 ./install.sh --uninstall
 ```
+
+---
 
 ## License
 
