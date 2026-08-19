@@ -1330,7 +1330,9 @@ Panel {
                     anchors.rightMargin: Style.space(3)
                     width: Style.space(18)
                     height: Style.space(18)
-                    color: dotsMouse.containsMouse || menuPopup.opened ? root.barForeground : "transparent"
+                    color: dotsMouse.containsMouse || menuPopup.opened
+                      ? Style.selectedFillFor(root.barForeground, Color.accent)
+                      : "transparent"
                     radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(3)
                     visible: bubbleMouse.containsMouse || dotsMouse.containsMouse || menuPopup.opened
                     z: 10
@@ -1340,9 +1342,7 @@ Panel {
                       text: "\uf142" // FontAwesome vertical ellipsis (⋮)
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
-                      color: dotsMouse.containsMouse || menuPopup.opened
-                        ? Color.background
-                        : (messageRow.modelData.fromMe ? root.barForeground : root.secondaryForeground)
+                      color: dotsMouse.containsMouse || menuPopup.opened ? root.barForeground : root.secondaryForeground
                     }
 
                     MouseArea {
@@ -1362,7 +1362,7 @@ Panel {
                       closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
 
                       background: Rectangle {
-                        color: root.barForeground
+                        color: Style.normalFillFor(root.barForeground, Color.accent)
                         border.color: root.bar ? root.bar.urgent : Color.accent
                         border.width: 1
                         radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(4)
@@ -1375,7 +1375,9 @@ Panel {
                         Rectangle {
                           width: parent.width
                           height: Style.space(22)
-                          color: replyItemMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.accent) : "transparent"
+                          color: replyItemMouse.containsMouse
+                            ? Style.selectedFillFor(root.barForeground, Color.accent)
+                            : "transparent"
                           radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(3)
 
                           Row {
@@ -1389,7 +1391,7 @@ Panel {
                               text: "\uf112"
                               font.family: root.fontFamily
                               font.pixelSize: Style.font.caption
-                              color: Color.background
+                              color: root.barForeground
                             }
 
                             Text {
@@ -1397,7 +1399,7 @@ Panel {
                               text: "Yanıtla"
                               font.family: root.fontFamily
                               font.pixelSize: Style.font.caption
-                              color: Color.background
+                              color: root.barForeground
                             }
                           }
 
@@ -1419,7 +1421,9 @@ Panel {
                           visible: messageRow.modelData.fromMe
                           width: parent.width
                           height: Style.space(22)
-                          color: deleteItemMouse.containsMouse ? (root.bar ? root.bar.urgent : Color.urgent) : "transparent"
+                          color: deleteItemMouse.containsMouse
+                            ? Style.selectedFillFor(root.barForeground, root.bar ? root.bar.urgent : Color.urgent)
+                            : "transparent"
                           radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(3)
 
                           Row {
@@ -1433,7 +1437,7 @@ Panel {
                               text: "\uf1f8"
                               font.family: root.fontFamily
                               font.pixelSize: Style.font.caption
-                              color: Color.background
+                              color: deleteItemMouse.containsMouse ? root.barForeground : (root.bar ? root.bar.urgent : Color.urgent)
                             }
 
                             Text {
@@ -1441,7 +1445,7 @@ Panel {
                               text: "Sil"
                               font.family: root.fontFamily
                               font.pixelSize: Style.font.caption
-                              color: Color.background
+                              color: deleteItemMouse.containsMouse ? root.barForeground : (root.bar ? root.bar.urgent : Color.urgent)
                             }
                           }
 
