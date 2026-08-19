@@ -72,6 +72,7 @@ let chatsFlushTimer = null
 let lastStateJson = ''
 let resolvingNames = false
 const groupNames = new Map()
+const profileLookups = new Map()
 const wantedChats = new Set()
 
 // Baileys timestamps arrive as number | Long | string depending on where in the
@@ -245,6 +246,9 @@ function ingest(chatJid, raw, { live }) {
   }
 
   resolveGroupName(canonicalTarget)
+  if (!chat.isGroup && isPlaceholderName(store.lookupName(canonicalTarget))) {
+    resolveProfileName(canonicalTarget)
+  }
 
   if (message.fromMe) {
     store.setUnread(canonicalTarget, 0)
@@ -334,6 +338,46 @@ function asLidJid(value) {
   return `${raw}@lid`
 }
 
+async function resolveProfileName(jid) {
+  if (!sock || connection !== 'open' || !jid) return
+  const canonical = store.canonicalJid(jid) || normalizeJid(jid)
+  if (!canonical || isGroupJid(canonical) || profileLookups.has(canonical)) return
+  if (!isPlaceholderName(store.lookupName(canonical))) return
+
+  profileLookups.set(canonical, true)
+  try {
+    // 1. Try Business Profile lookup
+    if (sock.getBusinessProfile) {
+      const biz = await sock.getBusinessProfile(canonical)
+      const bizName = biz?.description ? (biz.description.split('\n')[0] || '').trim() : ''
+      if (bizName && !isPlaceholderName(bizName)) {
+        store.rememberPushName(canonical, bizName)
+        pushChats()
+        return
+      }
+    }
+
+    // 2. Try USync Bot / Contact profile query
+    const query = new USyncQuery().withContactProtocol().withBotProfileProtocol().withLIDProtocol()
+    if (canonical.endsWith('@lid')) {
+      query.withUser(new USyncUser().withLid(canonical).withId(canonical))
+    } else {
+      query.withUser(new USyncUser().withId(canonical).withPhone(canonical.split('@')[0]))
+    }
+    const result = await sock.executeUSyncQuery(query)
+    for (const row of result?.list || []) {
+      const name = row.bot?.name || row.contact?.name || row.contact?.verifiedName
+      if (name && !isPlaceholderName(name)) {
+        store.rememberPushName(canonical, name)
+        pushChats()
+        return
+      }
+    }
+  } catch (err) {
+    logger.debug({ err, jid: canonical }, 'profile name resolution failed')
+  }
+}
+
 async function resolveContactLids() {
   if (!sock || connection !== 'open' || resolvingNames) return
   resolvingNames = true
@@ -352,23 +396,52 @@ async function resolveContactLids() {
       }
     }
 
-    const unknownLids = store.sortedChats()
-      .filter((chat) => chat.jid.endsWith('@lid') && !store.lookupName(chat.jid))
+    const unknownChats = store.sortedChats()
+      .filter((chat) => !chat.isGroup && isPlaceholderName(store.lookupName(chat.jid)))
       .slice(0, 50)
-    if (unknownLids.length) {
+
+    if (unknownChats.length) {
       try {
-        const query = new USyncQuery().withContactProtocol().withLIDProtocol()
-        for (const chat of unknownLids) {
-          query.withUser(new USyncUser().withLid(chat.jid).withId(chat.jid))
+        const query = new USyncQuery().withContactProtocol().withBotProfileProtocol().withLIDProtocol()
+        for (const chat of unknownChats) {
+          const user = new USyncUser().withId(chat.jid)
+          if (chat.jid.endsWith('@lid')) {
+            user.withLid(chat.jid)
+          } else {
+            user.withPhone(chat.jid.split('@')[0])
+          }
+          query.withUser(user)
         }
         const result = await sock.executeUSyncQuery(query)
         for (const row of result?.list || []) {
           const lid = asLidJid(row.lid || (String(row.id || '').endsWith('@lid') ? row.id : ''))
           const pn = String(row.id || '').endsWith('@s.whatsapp.net') ? row.id : ''
           if (lid && pn) store.alias(lid, pn)
+
+          const target = lid || pn || row.id
+          const name = row.bot?.name || row.contact?.name || row.contact?.verifiedName
+          if (target && name && !isPlaceholderName(name)) {
+            store.rememberPushName(target, name)
+          }
         }
       } catch (err) {
-        logger.debug({ err }, 'lid usync failed')
+        logger.debug({ err }, 'unknown chats usync failed')
+      }
+
+      // Check remaining unnamed chats for business profiles
+      for (const chat of unknownChats) {
+        if (!sock || connection !== 'open') break
+        if (isPlaceholderName(store.lookupName(chat.jid)) && sock.getBusinessProfile) {
+          try {
+            const biz = await sock.getBusinessProfile(chat.jid)
+            if (biz?.wid) {
+              const name = biz.description ? (biz.description.split('\n')[0] || '').trim() : ''
+              if (name && !isPlaceholderName(name)) store.rememberPushName(chat.jid, name)
+            }
+          } catch (err) {
+            logger.debug({ err, jid: chat.jid }, 'business profile lookup failed')
+          }
+        }
       }
     }
 

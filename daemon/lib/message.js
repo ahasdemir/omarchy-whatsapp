@@ -238,6 +238,7 @@ export function prettyJid(jid) {
   const [userPart, server] = String(jid).split('@')
   const user = (userPart || '').split(':')[0]
   if (!user) return String(jid)
+  if (user === '0' && (server === 's.whatsapp.net' || server === 'c.us')) return 'WhatsApp'
   if (isGroupJid(jid) || server === 'g.us') return 'Group'
   // Linked-ID chats are not phone numbers; prefixing "+" just looks like garbage.
   if (server === 'lid') return user
