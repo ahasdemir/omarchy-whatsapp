@@ -72,6 +72,7 @@ Scope {
     property string searchFilter: ""
     property string peekImagePath: ""
     property var favoriteJids: ({})
+    property var replyingToMessage: null
 
     // Custom Omarchy Styled ToolTip
     component AppToolTip: ToolTip {
@@ -124,6 +125,12 @@ Scope {
         Qt.callLater(function () { messageList.positionViewAtEnd() })
         client.markRead(jid)
       }
+
+      function onMessageDeleted(jid, messageId, chat) {
+        if (jid !== window.activeJid) return
+        var list = window.messages.filter(function (m) { return m && m.id !== messageId })
+        window.messages = list
+      }
     }
 
     function isFavorite(jid) {
@@ -152,6 +159,7 @@ Scope {
       window.messages = []
       window.loadedMessageLimit = 60
       window.pinToLatest = true
+      window.replyingToMessage = null
       client.loadMessages(jid, 60)
       client.markRead(jid)
       Qt.callLater(function () { composer.forceActiveFocus() })
@@ -168,8 +176,10 @@ Scope {
       var text = composer.text
       if (!text || !text.trim().length) return
       if (!client.ready || !window.activeJid) return
-      if (client.sendMessage(window.activeJid, text)) {
+      var quotedId = window.replyingToMessage ? window.replyingToMessage.id : ""
+      if (client.sendMessage(window.activeJid, text, quotedId)) {
         composer.text = ""
+        window.replyingToMessage = null
       }
     }
 
@@ -889,12 +899,13 @@ Scope {
                         Rectangle { Layout.fillWidth: true; height: 1; color: window.borderColor }
                       }
 
-                      // Omarchy Monochromatic Message Bubble Row (Matching Panel.qml Widget styling)
+                      // Omarchy Monochromatic Message Bubble Row
                       RowLayout {
                         width: parent.width
                         layoutDirection: msgRow.isMe ? Qt.RightToLeft : Qt.LeftToRight
 
                         Rectangle {
+                          id: bubbleBox
                           Layout.maximumWidth: messageList.width * 0.72
                           implicitWidth: bubbleCol.implicitWidth + 20
                           implicitHeight: bubbleCol.implicitHeight + 14
@@ -902,6 +913,77 @@ Scope {
                           color: msgRow.isMe
                             ? Commons.Style.selectedFillFor(Commons.Color.foreground, Commons.Color.urgent || Commons.Color.accent)
                             : Commons.Style.normalFillFor(Commons.Color.foreground, Commons.Color.accent)
+
+                          MouseArea {
+                            id: bubbleMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                          }
+
+                          // Action Toolbar (Reply & Delete) on Message Hover
+                          RowLayout {
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.topMargin: -12
+                            spacing: 4
+                            visible: bubbleMouse.containsMouse
+
+                            Rectangle {
+                              width: 22
+                              height: 22
+                              color: window.bgSurface
+                              border.color: window.borderActive
+                              border.width: 1
+
+                              Text {
+                                anchors.centerIn: parent
+                                text: "\uf112" // Reply icon
+                                font.family: window.fontFamily
+                                font.pixelSize: 10
+                                color: window.fgMain
+                              }
+
+                              AppToolTip { visible: replyBtnMouse.containsMouse; text: "Reply to message" }
+
+                              MouseArea {
+                                id: replyBtnMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                  window.replyingToMessage = msgRow.modelData
+                                  composer.forceActiveFocus()
+                                }
+                              }
+                            }
+
+                            Rectangle {
+                              visible: msgRow.isMe
+                              width: 22
+                              height: 22
+                              color: window.bgSurface
+                              border.color: window.urgentColor
+                              border.width: 1
+
+                              Text {
+                                anchors.centerIn: parent
+                                text: "\uf1f8" // Delete icon
+                                font.family: window.fontFamily
+                                font.pixelSize: 10
+                                color: window.urgentColor
+                              }
+
+                              AppToolTip { visible: deleteBtnMouse.containsMouse; text: "Delete message" }
+
+                              MouseArea {
+                                id: deleteBtnMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: client.deleteMessage(window.activeJid, msgRow.modelData.id)
+                              }
+                            }
+                          }
 
                           ColumnLayout {
                             id: bubbleCol
@@ -917,6 +999,47 @@ Scope {
                               font.family: window.fontFamily
                               font.pixelSize: 11
                               font.bold: true
+                            }
+
+                            // Quoted Message Snippet Box
+                            Rectangle {
+                              visible: !!(msgRow.modelData && msgRow.modelData.quotedText)
+                              Layout.fillWidth: true
+                              implicitHeight: quotedCol.implicitHeight + 8
+                              color: window.bgBase
+                              border.color: window.borderColor
+                              border.width: 1
+
+                              RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                spacing: 6
+
+                                Rectangle { width: 2; Layout.fillHeight: true; color: window.borderActive }
+
+                                ColumnLayout {
+                                  id: quotedCol
+                                  Layout.fillWidth: true
+                                  spacing: 2
+
+                                  Text {
+                                    text: msgRow.modelData.quotedSender || "Quoted message"
+                                    color: window.borderActive
+                                    font.family: window.fontFamily
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                  }
+
+                                  Text {
+                                    text: msgRow.modelData.quotedText || ""
+                                    color: window.fgMuted
+                                    font.family: window.fontFamily
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                  }
+                                }
+                              }
                             }
 
                             // Image Attachment Preview
@@ -978,69 +1101,130 @@ Scope {
                     }
                   }
 
-                  // Omarchy Bordered Input Box (Composer)
-                  Rectangle {
+                  // Omarchy Bordered Input Box (Composer with Quoted Reply Banner)
+                  ColumnLayout {
                     Layout.fillWidth: true
-                    height: 48
-                    color: window.bgSurface
+                    spacing: 0
                     visible: !!window.activeJid
 
+                    // Quoted Reply Preview Banner above Composer
                     Rectangle {
-                      anchors.top: parent.top
-                      width: parent.width
-                      height: 1
-                      color: window.borderColor
-                    }
+                      Layout.fillWidth: true
+                      height: window.replyingToMessage ? 36 : 0
+                      visible: !!window.replyingToMessage
+                      color: window.bgSidebar
+                      border.color: window.borderColor
+                      border.width: 1
 
-                    RowLayout {
-                      anchors.fill: parent
-                      anchors.leftMargin: 12
-                      anchors.rightMargin: 12
-                      spacing: 8
+                      RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        spacing: 8
 
-                      Rectangle {
-                        Layout.fillWidth: true
-                        height: 32
-                        color: window.bgBase
-                        border.color: composer.activeFocus ? window.borderActive : window.borderColor
-                        border.width: 1
+                        Rectangle { width: 3; Layout.fillHeight: true; color: window.borderActive }
 
-                        TextField {
-                          id: composer
-                          anchors.fill: parent
-                          anchors.leftMargin: 8
-                          anchors.rightMargin: 8
-                          placeholderText: "Type a message..."
-                          placeholderTextColor: window.fgDim
-                          color: window.fgMain
-                          font.family: window.fontFamily
-                          font.pixelSize: 12
-                          background: null
-                          onAccepted: window.sendReply()
+                        ColumnLayout {
+                          Layout.fillWidth: true
+                          spacing: 1
+
+                          Text {
+                            text: window.replyingToMessage ? (window.replyingToMessage.senderName || (window.replyingToMessage.fromMe ? "You" : "Sender")) : ""
+                            font.family: window.fontFamily
+                            font.pixelSize: 10
+                            font.bold: true
+                            color: window.borderActive
+                          }
+
+                          Text {
+                            text: window.replyingToMessage ? (window.replyingToMessage.text || "") : ""
+                            font.family: window.fontFamily
+                            font.pixelSize: 11
+                            color: window.fgMuted
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                          }
                         }
-                      }
-
-                      Rectangle {
-                        width: 54
-                        height: 32
-                        color: sendMouse.containsMouse ? window.bgHover : window.bgSurface
-                        border.color: window.borderActive
-                        border.width: 1
 
                         Text {
-                          anchors.centerIn: parent
-                          text: "Send"
+                          text: "✕"
                           font.family: window.fontFamily
-                          font.pixelSize: 11
-                          color: window.fgMain
+                          font.pixelSize: 12
+                          color: cancelReplyMouse.containsMouse ? window.fgMain : window.fgDim
+
+                          MouseArea {
+                            id: cancelReplyMouse
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.replyingToMessage = null
+                          }
+                        }
+                      }
+                    }
+
+                    // Main Text Composer Field
+                    Rectangle {
+                      Layout.fillWidth: true
+                      height: 48
+                      color: window.bgSurface
+
+                      Rectangle {
+                        anchors.top: parent.top
+                        width: parent.width
+                        height: 1
+                        color: window.borderColor
+                      }
+
+                      RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        spacing: 8
+
+                        Rectangle {
+                          Layout.fillWidth: true
+                          height: 32
+                          color: window.bgBase
+                          border.color: composer.activeFocus ? window.borderActive : window.borderColor
+                          border.width: 1
+
+                          TextField {
+                            id: composer
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            placeholderText: window.replyingToMessage ? "Type a reply..." : "Type a message..."
+                            placeholderTextColor: window.fgDim
+                            color: window.fgMain
+                            font.family: window.fontFamily
+                            font.pixelSize: 12
+                            background: null
+                            onAccepted: window.sendReply()
+                          }
                         }
 
-                        MouseArea {
-                          id: sendMouse
-                          anchors.fill: parent
-                          hoverEnabled: true
-                          cursorShape: Qt.PointingHandCursor
-                          onClicked: window.sendReply()
+                        Rectangle {
+                          width: 54
+                          height: 32
+                          color: sendMouse.containsMouse ? window.bgHover : window.bgSurface
+                          border.color: window.borderActive
+                          border.width: 1
+
+                          Text {
+                            anchors.centerIn: parent
+                            text: "Send"
+                            font.family: window.fontFamily
+                            font.pixelSize: 11
+                            color: window.fgMain
+                          }
+
+                          MouseArea {
+                            id: sendMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: window.sendReply()
+                          }
                         }
                       }
                     }

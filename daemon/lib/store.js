@@ -332,6 +332,32 @@ export class Store {
     return list
   }
 
+  deleteMessage(jid, messageId) {
+    const key = this.canonicalJid(jid) || normalizeJid(jid) || jid
+    const list = this.messages.get(key) || []
+    const idx = list.findIndex((m) => m.id === messageId)
+    if (idx !== -1) {
+      list.splice(idx, 1)
+      this.messages.set(key, list)
+      const chat = this.chats.get(key)
+      if (chat) {
+        if (list.length > 0) {
+          const last = list[list.length - 1]
+          chat.lastTs = last.ts || 0
+          chat.lastText = last.text
+          chat.lastFromMe = !!last.fromMe
+          chat.lastSender = last.senderName || ''
+        } else {
+          chat.lastTs = 0
+          chat.lastText = ''
+        }
+      }
+      this.markDirty()
+      return true
+    }
+    return false
+  }
+
   touchChat(jid, message) {
     const chat = this.chat(jid)
     if ((message.ts || 0) >= (chat.lastTs || 0)) {

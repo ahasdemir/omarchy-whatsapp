@@ -185,6 +185,18 @@ function flatten(chatJid, message) {
       participant: message.key?.participant || undefined
     }
   }
+
+  const contextInfo = message.message?.extendedTextMessage?.contextInfo ||
+                      message.message?.imageMessage?.contextInfo ||
+                      message.message?.videoMessage?.contextInfo ||
+                      message.message?.documentMessage?.contextInfo
+  if (contextInfo?.quotedMessage) {
+    flat.quotedId = contextInfo.stanzaId || ''
+    flat.quotedText = messageText(contextInfo.quotedMessage) || ''
+    const qParticipant = contextInfo.participant ? jidNormalizedUser(contextInfo.participant) : ''
+    flat.quotedSender = qParticipant ? store.displayName(qParticipant) : ''
+  }
+
   if (image) {
     const { caption, ...payload } = image
     flat.media = payload
@@ -990,6 +1002,29 @@ async function handleCommand(payload, reply) {
       await markRead(payload.jid)
       reply({ t: 'ack', id, ok: true, jid: payload.jid })
       return
+
+    case 'delete': {
+      const rawJid = payload.jid
+      const messageId = payload.id || payload.messageId
+      if (!rawJid || !messageId) throw new Error('delete: jid and messageId required')
+      if (!sock || connection !== 'open') throw new Error('delete: not connected to WhatsApp')
+
+      const canonical = store.canonicalJid(rawJid) || rawJid
+      const list = store.messages.get(canonical) || []
+      const targetMsg = list.find((m) => m.id === messageId)
+      if (targetMsg?.key) {
+        try {
+          await sock.sendMessage(rawJid, { delete: targetMsg.key })
+        } catch (err) {
+          logger.debug({ err }, 'remote delete call failed, deleting locally')
+        }
+      }
+      store.deleteMessage(canonical, messageId)
+      bus.broadcast({ t: 'delete', jid: rawJid, messageId, chat: store.chat(canonical) })
+      pushChats()
+      reply({ t: 'ack', id, ok: true, jid: rawJid, messageId })
+      return
+    }
 
     case 'typing': {
       if (!payload.jid || !sock || connection !== 'open') {
