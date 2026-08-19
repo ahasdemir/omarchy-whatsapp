@@ -920,76 +920,136 @@ Scope {
                             hoverEnabled: true
                           }
 
-                          // Sleek Omarchy Action Chip (Inside Top Right Corner of Bubble)
+                          // 3-Dots Action Menu Button (Appears on Hover)
                           Rectangle {
-                            id: actionChip
+                            id: dotsBtn
                             anchors.right: parent.right
                             anchors.top: parent.top
                             anchors.topMargin: 4
                             anchors.rightMargin: 4
-                            width: actionRow.implicitWidth + 10
-                            height: 22
-                            color: window.fgMain
+                            width: 20
+                            height: 20
+                            color: dotsMouse.containsMouse || menuPopup.opened ? window.fgMain : "transparent"
                             radius: 3
-                            visible: bubbleMouse.containsMouse || chipMouse.containsMouse
+                            visible: bubbleMouse.containsMouse || dotsMouse.containsMouse || menuPopup.opened
                             z: 10
 
-                            MouseArea {
-                              id: chipMouse
-                              anchors.fill: parent
-                              hoverEnabled: true
+                            Text {
+                              anchors.centerIn: parent
+                              text: "\uf142" // FontAwesome vertical ellipsis (⋮)
+                              font.family: window.fontFamily
+                              font.pixelSize: 11
+                              color: dotsMouse.containsMouse || menuPopup.opened
+                                ? window.bgBase
+                                : (msgRow.isMe ? window.fgMain : window.fgMuted)
                             }
 
-                            RowLayout {
-                              id: actionRow
-                              anchors.centerIn: parent
-                              spacing: 4
+                            MouseArea {
+                              id: dotsMouse
+                              anchors.fill: parent
+                              hoverEnabled: true
+                              cursorShape: Qt.PointingHandCursor
+                              onClicked: menuPopup.opened ? menuPopup.close() : menuPopup.open()
+                            }
 
-                              Item {
-                                implicitWidth: 20; implicitHeight: 20
+                            Popup {
+                              id: menuPopup
+                              y: parent.height + 2
+                              x: parent.width - width
+                              width: 110
+                              padding: 4
+                              closePolicy: Popup.CloseOnPressOutside | Popup.CloseOnEscape
 
-                                Text {
-                                  anchors.centerIn: parent
-                                  text: "\uf112" // Reply icon
-                                  font.family: window.fontFamily
-                                  font.pixelSize: 10
-                                  color: replyBtnMouse.containsMouse ? window.borderActive : window.bgBase
-                                }
-
-                                AppToolTip { visible: replyBtnMouse.containsMouse; text: "Reply to message" }
-
-                                MouseArea {
-                                  id: replyBtnMouse
-                                  anchors.fill: parent
-                                  hoverEnabled: true
-                                  cursorShape: Qt.PointingHandCursor
-                                  onClicked: {
-                                    window.replyingToMessage = msgRow.modelData
-                                    composer.forceActiveFocus()
-                                  }
-                                }
+                              background: Rectangle {
+                                color: window.bgSurface
+                                border.color: window.borderActive
+                                border.width: 1
+                                radius: 4
                               }
 
-                              Item {
-                                visible: msgRow.isMe
-                                implicitWidth: 20; implicitHeight: 20
+                              contentItem: ColumnLayout {
+                                spacing: 2
 
-                                Text {
-                                  anchors.centerIn: parent
-                                  text: "\uf1f8" // Delete icon
-                                  font.family: window.fontFamily
-                                  font.pixelSize: 10
-                                  color: deleteBtnMouse.containsMouse ? window.urgentColor : window.bgBase
+                                // Option 1: Reply
+                                Rectangle {
+                                  Layout.fillWidth: true
+                                  height: 24
+                                  color: replyItemMouse.containsMouse ? window.bgHover : "transparent"
+                                  radius: 3
+
+                                  RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 6
+                                    spacing: 6
+
+                                    Text {
+                                      text: "\uf112"
+                                      font.family: window.fontFamily
+                                      font.pixelSize: 11
+                                      color: window.fgMain
+                                    }
+
+                                    Text {
+                                      text: "Yanıtla"
+                                      font.family: window.fontFamily
+                                      font.pixelSize: 11
+                                      color: window.fgMain
+                                    }
+                                  }
+
+                                  MouseArea {
+                                    id: replyItemMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                      menuPopup.close()
+                                      window.replyingToMessage = msgRow.modelData
+                                      composer.forceActiveFocus()
+                                    }
+                                  }
                                 }
 
-                                AppToolTip { visible: deleteBtnMouse.containsMouse; text: "Delete message" }
+                                // Option 2: Delete (if sent by me)
+                                Rectangle {
+                                  visible: msgRow.isMe
+                                  Layout.fillWidth: true
+                                  height: 24
+                                  color: deleteItemMouse.containsMouse ? window.bgHover : "transparent"
+                                  radius: 3
 
-                                MouseArea {
-                                  id: deleteBtnMouse
-                                  anchors.fill: parent
-                                  hoverEnabled: true
-                                  cursorShape: Qt.PointingHandCursor
-                                  onClicked: client.deleteMessage(window.activeJid, msgRow.modelData.id)
+                                  RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 6
+                                    spacing: 6
+
+                                    Text {
+                                      text: "\uf1f8"
+                                      font.family: window.fontFamily
+                                      font.pixelSize: 11
+                                      color: window.urgentColor
+                                    }
+
+                                    Text {
+                                      text: "Sil"
+                                      font.family: window.fontFamily
+                                      font.pixelSize: 11
+                                      color: window.urgentColor
+                                    }
+                                  }
+
+                                  MouseArea {
+                                    id: deleteItemMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                      menuPopup.close()
+                                      client.deleteMessage(window.activeJid, msgRow.modelData.id)
+                                    }
+                                  }
                                 }
                               }
                             }
