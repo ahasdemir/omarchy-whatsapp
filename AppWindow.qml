@@ -920,67 +920,60 @@ Scope {
                             hoverEnabled: true
                           }
 
-                          // Action Toolbar (Reply & Delete) on Message Hover
-                          RowLayout {
+                          // Sleek Omarchy Action Chip (Inside Top Right Corner of Bubble)
+                          Rectangle {
                             anchors.right: parent.right
                             anchors.top: parent.top
-                            anchors.topMargin: -12
-                            spacing: 4
+                            anchors.topMargin: 4
+                            anchors.rightMargin: 4
+                            width: actionRow.implicitWidth + 8
+                            height: 20
+                            color: window.fgMain
+                            radius: 3
                             visible: bubbleMouse.containsMouse
+                            z: 10
 
-                            Rectangle {
-                              width: 22
-                              height: 22
-                              color: window.bgSurface
-                              border.color: window.borderActive
-                              border.width: 1
+                            RowLayout {
+                              id: actionRow
+                              anchors.centerIn: parent
+                              spacing: 6
 
                               Text {
-                                anchors.centerIn: parent
                                 text: "\uf112" // Reply icon
                                 font.family: window.fontFamily
                                 font.pixelSize: 10
-                                color: window.fgMain
-                              }
+                                color: replyBtnMouse.containsMouse ? window.borderActive : window.bgBase
 
-                              AppToolTip { visible: replyBtnMouse.containsMouse; text: "Reply to message" }
+                                AppToolTip { visible: replyBtnMouse.containsMouse; text: "Reply to message" }
 
-                              MouseArea {
-                                id: replyBtnMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                  window.replyingToMessage = msgRow.modelData
-                                  composer.forceActiveFocus()
+                                MouseArea {
+                                  id: replyBtnMouse
+                                  anchors.fill: parent
+                                  hoverEnabled: true
+                                  cursorShape: Qt.PointingHandCursor
+                                  onClicked: {
+                                    window.replyingToMessage = msgRow.modelData
+                                    composer.forceActiveFocus()
+                                  }
                                 }
                               }
-                            }
-
-                            Rectangle {
-                              visible: msgRow.isMe
-                              width: 22
-                              height: 22
-                              color: window.bgSurface
-                              border.color: window.urgentColor
-                              border.width: 1
 
                               Text {
-                                anchors.centerIn: parent
+                                visible: msgRow.isMe
                                 text: "\uf1f8" // Delete icon
                                 font.family: window.fontFamily
                                 font.pixelSize: 10
-                                color: window.urgentColor
-                              }
+                                color: deleteBtnMouse.containsMouse ? window.urgentColor : window.bgBase
 
-                              AppToolTip { visible: deleteBtnMouse.containsMouse; text: "Delete message" }
+                                AppToolTip { visible: deleteBtnMouse.containsMouse; text: "Delete message" }
 
-                              MouseArea {
-                                id: deleteBtnMouse
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: client.deleteMessage(window.activeJid, msgRow.modelData.id)
+                                MouseArea {
+                                  id: deleteBtnMouse
+                                  anchors.fill: parent
+                                  hoverEnabled: true
+                                  cursorShape: Qt.PointingHandCursor
+                                  onClicked: client.deleteMessage(window.activeJid, msgRow.modelData.id)
+                                }
                               }
                             }
                           }
