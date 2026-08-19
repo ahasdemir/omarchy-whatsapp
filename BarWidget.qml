@@ -51,8 +51,7 @@ BarWidget {
   }
 
   function openAppWindow() {
-    appLauncher.running = false
-    appLauncher.running = true
+    Quickshell.execDetached([root.pluginDir + "/bin/omarchy-whatsapp-app"])
   }
 
   function handleBarClick(buttonCode) {

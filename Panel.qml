@@ -423,8 +423,7 @@ Panel {
     if (root.hostWidget && root.hostWidget.openAppWindow) {
       root.hostWidget.openAppWindow()
     } else {
-      appLauncher.running = false
-      appLauncher.running = true
+      Quickshell.execDetached([root.pluginDir + "/bin/omarchy-whatsapp-app"])
     }
   }
 
