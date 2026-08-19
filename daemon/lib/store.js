@@ -3,7 +3,7 @@ import { storeFile } from './paths.js'
 import { logger } from './logger.js'
 import { isGroupJid, prettyJid } from './message.js'
 
-const MAX_MESSAGES_PER_CHAT = 200
+const MAX_MESSAGES_PER_CHAT = 1000
 const MAX_CHATS = 300
 const PERSIST_DEBOUNCE_MS = 2000
 
