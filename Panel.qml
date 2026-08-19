@@ -1439,14 +1439,14 @@ Panel {
           Rectangle {
             id: replyBanner
             width: parent.width
-            height: root.replyingToMessage ? Style.space(28) : 0
+            height: root.replyingToMessage ? Style.space(38) : 0
             visible: !!root.replyingToMessage
             color: Style.selectedFillFor(root.barForeground, Color.accent)
             radius: Style.cornerRadius > 0 ? Style.cornerRadius : Style.space(4)
 
             Row {
               anchors.fill: parent
-              anchors.margins: Style.space(4)
+              anchors.margins: Style.space(5)
               spacing: Style.space(6)
 
               Rectangle {
@@ -1457,14 +1457,16 @@ Panel {
 
               Column {
                 width: parent.width - Style.space(30)
-                spacing: 1
+                spacing: 2
 
                 Text {
+                  width: parent.width
                   text: root.replyingToMessage ? (root.replyingToMessage.senderName || (root.replyingToMessage.fromMe ? "You" : "Sender")) : ""
                   color: root.bar ? root.bar.urgent : Color.accent
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   font.bold: true
+                  elide: Text.ElideRight
                 }
 
                 Text {
