@@ -120,11 +120,6 @@ BarWidget {
       return root.linked ? root.glyphLinked : root.glyphOffline
     }
     active: root.unread > 0
-    activeColor: {
-      var base = (root.bar && root.bar.urgent) ? root.bar.urgent : Color.urgent
-      // WhatsApp signature green fallback or brightened active theme color
-      return Qt.lighter(base, 1.45)
-    }
     dimmed: !root.linked
     tooltipText: {
       if (client.needsLogin) return "WhatsApp"
